@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Neon Snake 3D</title>
+<style>
+  :root {
+    --cyan: #19f6ff;
+    --magenta: #ff2bd6;
+    --purple: #9d4bff;
+    --bg: #08020f;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); }
+  body {
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    color: #fff;
+    -webkit-user-select: none; user-select: none;
+    touch-action: none;
+  }
+  #app { position: fixed; inset: 0; }
+  canvas { display: block; }
+
+  /* ---------- HUD ---------- */
+  #hud {
+    position: fixed; top: 0; left: 0; right: 0;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    padding: 22px 28px;
+    pointer-events: none;
+    z-index: 10;
+  }
+  .stat { text-transform: uppercase; letter-spacing: 3px; font-size: 12px; opacity: .75; }
+  .value {
+    font-size: 34px; font-weight: 700; letter-spacing: 1px; line-height: 1;
+    margin-top: 4px;
+  }
+  #score .value { color: var(--cyan); text-shadow: 0 0 14px var(--cyan); }
+  #best  { text-align: right; }
+  #best .value { color: var(--magenta); text-shadow: 0 0 14px var(--magenta); }
+
+  /* ---------- Overlays ---------- */
+  #overlay {
+    position: fixed; inset: 0;
+    display: flex; flex-direction: column; justify-content: center; align-items: center;
+    text-align: center;
+    background: radial-gradient(circle at center, rgba(20,2,40,.55), rgba(4,1,8,.92));
+    backdrop-filter: blur(3px);
+    z-index: 20;
+    transition: opacity .35s ease;
+  }
+  #overlay.hidden { opacity: 0; pointer-events: none; }
+
+  .title {
+    font-size: clamp(40px, 9vw, 92px);
+    font-weight: 800;
+    letter-spacing: 6px;
+    line-height: .95;
+    background: linear-gradient(90deg, var(--cyan), var(--magenta));
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+    filter: drop-shadow(0 0 22px rgba(255,43,214,.5));
+  }
+  .subtitle { margin-top: 6px; font-size: 14px; letter-spacing: 8px; text-transform: uppercase; color: var(--purple); }
+
+  .panel {
+    margin-top: 34px;
+    font-size: 15px; line-height: 1.9; opacity: .85;
+  }
+  .panel kbd {
+    display: inline-block; min-width: 26px; padding: 3px 8px; margin: 0 2px;
+    border: 1px solid rgba(255,255,255,.35); border-radius: 6px;
+    font-family: inherit; font-size: 13px; background: rgba(255,255,255,.06);
+    box-shadow: 0 0 10px rgba(25,246,255,.15);
+  }
+
+  .cta {
+    margin-top: 38px;
+    font-size: 18px; letter-spacing: 2px; text-transform: uppercase; font-weight: 600;
+    color: #fff;
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: .45; } 50% { opacity: 1; } }
+
+  #finalScore { margin-top: 18px; font-size: 20px; }
+  #finalScore b { color: var(--cyan); font-size: 28px; text-shadow: 0 0 14px var(--cyan); }
+  .newbest { color: var(--magenta); text-shadow: 0 0 12px var(--magenta); letter-spacing: 3px; font-weight: 700; margin-top: 8px; }
+
+  /* ---------- Mobile controls ---------- */
+  #touch {
+    position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%);
+    display: none; grid-template-columns: repeat(3, 64px); grid-template-rows: repeat(2, 64px);
+    gap: 8px; z-index: 15;
+  }
+  #touch button {
+    border: 1px solid rgba(25,246,255,.4); border-radius: 14px;
+    background: rgba(25,246,255,.08); color: var(--cyan);
+    font-size: 26px; pointer-events: auto; -webkit-tap-highlight-color: transparent;
+    box-shadow: 0 0 16px rgba(25,246,255,.12) inset;
+  }
+  #touch button:active { background: rgba(25,246,255,.25); }
+  .tu { grid-column: 2; grid-row: 1; }
+  .tl { grid-column: 1; grid-row: 2; }
+  .td { grid-column: 2; grid-row: 2; }
+  .tr { grid-column: 3; grid-row: 2; }
+  @media (pointer: coarse) { #touch { display: grid; } }
+</style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <div id="hud">
+    <div id="score"><div class="stat">Pontos</div><div class="value">0</div></div>
+    <div id="best"><div class="stat">Recorde</div><div class="value">0</div></div>
+  </div>
+
+  <div id="overlay">
+    <div class="title">NEON&nbsp;SNAKE</div>
+    <div class="subtitle">3D</div>
+    <div class="panel" id="instructions">
+      Use <kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> ou <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> para mover<br>
+      Coma os orbes e cresça — não bata nas paredes nem em si mesmo
+    </div>
+    <div id="finalScore" style="display:none;"></div>
+    <div class="cta" id="cta">Pressione ESPAÇO para começar</div>
+  </div>
+
+  <div id="touch">
+    <button class="tu" data-dir="up">▲</button>
+    <button class="tl" data-dir="left">◀</button>
+    <button class="td" data-dir="down">▼</button>
+    <button class="tr" data-dir="right">▶</button>
+  </div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.184.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.184.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { Timer } from 'three/addons/misc/Timer.js';
+
+// ---------------------------------------------------------------------------
+// Config
+// ---------------------------------------------------------------------------
+const GRID = 17;            // tabuleiro GRID x GRID
+const CELL = 1;             // tamanho de cada célula no mundo
+const HALF = (GRID - 1) / 2;
+const BASE_TICK = 220;      // ms por passo no início (mais lento)
+const MIN_TICK = 90;        // velocidade máxima
+const COLORS = {
+  cyan: 0x19f6ff, magenta: 0xff2bd6, purple: 0x9d4bff,
+  head: 0x9dffea, food: 0xffe24b,
+};
+
+// ---------------------------------------------------------------------------
+// Renderer / Scene / Camera
+// ---------------------------------------------------------------------------
+const app = document.getElementById('app');
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+app.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x08020f);
+scene.fog = new THREE.Fog(0x08020f, 18, 42);
+
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
+// ângulo isométrico olhando o tabuleiro de cima e de lado
+camera.position.set(0, 16, 15);
+camera.lookAt(0, 0, 0);
+
+// ---------------------------------------------------------------------------
+// Luzes
+// ---------------------------------------------------------------------------
+scene.add(new THREE.AmbientLight(0x4422aa, 0.6));
+const dir = new THREE.DirectionalLight(0xffffff, 0.5);
+dir.position.set(6, 14, 8);
+scene.add(dir);
+const fill = new THREE.PointLight(COLORS.magenta, 0.6, 40);
+fill.position.set(-8, 6, -8);
+scene.add(fill);
+
+// ---------------------------------------------------------------------------
+// Tabuleiro
+// ---------------------------------------------------------------------------
+const board = new THREE.Group();
+scene.add(board);
+
+// chão
+const floor = new THREE.Mesh(
+  new THREE.PlaneGeometry(GRID, GRID),
+  new THREE.MeshStandardMaterial({ color: 0x0d0420, metalness: 0.4, roughness: 0.7 })
+);
+floor.rotation.x = -Math.PI / 2;
+floor.position.y = -0.5;
+board.add(floor);
+
+// grelha neon
+const grid = new THREE.GridHelper(GRID, GRID, COLORS.cyan, COLORS.purple);
+grid.material.transparent = true;
+grid.material.opacity = 0.35;
+grid.position.y = -0.49;
+board.add(grid);
+
+// moldura neon ao redor do tabuleiro
+const frameGeo = new THREE.EdgesGeometry(new THREE.BoxGeometry(GRID, 1, GRID));
+const frame = new THREE.LineSegments(frameGeo, new THREE.LineBasicMaterial({ color: COLORS.magenta }));
+frame.position.y = 0;
+board.add(frame);
+
+// helper célula -> mundo (centraliza na origem)
+function cellToWorld(x, z) {
+  return new THREE.Vector3(x - HALF, 0, z - HALF);
+}
+
+// ---------------------------------------------------------------------------
+// Materiais / geometrias reutilizados
+// ---------------------------------------------------------------------------
+const segGeo = new THREE.BoxGeometry(0.82, 0.82, 0.82);
+const bodyMat = new THREE.MeshStandardMaterial({
+  color: COLORS.cyan, emissive: COLORS.cyan, emissiveIntensity: 1.1,
+  metalness: 0.3, roughness: 0.35,
+});
+const headMat = new THREE.MeshStandardMaterial({
+  color: COLORS.head, emissive: COLORS.cyan, emissiveIntensity: 1.6,
+  metalness: 0.2, roughness: 0.25,
+});
+
+// comida
+const food = new THREE.Mesh(
+  new THREE.IcosahedronGeometry(0.42, 0),
+  new THREE.MeshStandardMaterial({
+    color: COLORS.food, emissive: COLORS.food, emissiveIntensity: 1.8,
+    metalness: 0.1, roughness: 0.2,
+  })
+);
+scene.add(food);
+const foodLight = new THREE.PointLight(COLORS.food, 1.2, 6);
+scene.add(foodLight);
+
+// ---------------------------------------------------------------------------
+// Post-processing (bloom synthwave)
+// ---------------------------------------------------------------------------
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(
+  new THREE.Vector2(window.innerWidth, window.innerHeight),
+  0.9,   // strength
+  0.6,   // radius
+  0.15   // threshold
+);
+composer.addPass(bloom);
+
+// ---------------------------------------------------------------------------
+// Estado do jogo
+// ---------------------------------------------------------------------------
+const DIRS = {
+  up:    { x: 0, z: -1 },
+  down:  { x: 0, z:  1 },
+  left:  { x: -1, z: 0 },
+  right: { x:  1, z: 0 },
+};
+let snake = [];          // [{x,z}], cabeça no índice 0
+let segMeshes = [];      // meshes paralelos a snake
+let direction, nextDirection;
+let foodCell = { x: 0, z: 0 };
+let score = 0;
+let best = Number(localStorage.getItem('neonSnakeBest') || 0);
+let tickInterval = BASE_TICK;
+let acc = 0;             // acumulador de tempo
+let state = 'ready';     // ready | playing | gameover
+// posições visuais anteriores p/ interpolação suave
+let prevPos = [];
+
+const elScore = document.querySelector('#score .value');
+const elBest = document.querySelector('#best .value');
+const overlay = document.getElementById('overlay');
+const cta = document.getElementById('cta');
+const finalScore = document.getElementById('finalScore');
+const instructions = document.getElementById('instructions');
+elBest.textContent = best;
+
+// ---------------------------------------------------------------------------
+// Lógica
+// ---------------------------------------------------------------------------
+function ensureMeshes(n) {
+  while (segMeshes.length < n) {
+    const m = new THREE.Mesh(segGeo, bodyMat);
+    scene.add(m);
+    segMeshes.push(m);
+  }
+  for (let i = 0; i < segMeshes.length; i++) {
+    segMeshes[i].visible = i < n;
+    segMeshes[i].material = i === 0 ? headMat : bodyMat;
+  }
+}
+
+function snakeOccupies(x, z) {
+  return snake.some(s => s.x === x && s.z === z);
+}
+
+function placeFood() {
+  let x, z;
+  do {
+    x = Math.floor(Math.random() * GRID);
+    z = Math.floor(Math.random() * GRID);
+  } while (snakeOccupies(x, z));
+  foodCell = { x, z };
+  const w = cellToWorld(x, z);
+  food.position.set(w.x, 0, w.z);
+  foodLight.position.set(w.x, 0.6, w.z);
+}
+
+function resetGame() {
+  snake = [];
+  const start = Math.floor(GRID / 2);
+  for (let i = 0; i < 4; i++) snake.push({ x: start - i, z: start });
+  direction = DIRS.right;
+  nextDirection = DIRS.right;
+  score = 0;
+  tickInterval = BASE_TICK;
+  acc = 0;
+  elScore.textContent = '0';
+  ensureMeshes(snake.length);
+  syncMeshes(true);
+  placeFood();
+}
+
+function syncMeshes(snap) {
+  for (let i = 0; i < snake.length; i++) {
+    const w = cellToWorld(snake[i].x, snake[i].z);
+    if (snap) {
+      segMeshes[i].position.set(w.x, 0, w.z);
+      prevPos[i] = w.clone();
+    }
+  }
+}
+
+function step() {
+  nextDirection && (direction = nextDirection);
+  const head = snake[0];
+  const nx = head.x + direction.x;
+  const nz = head.z + direction.z;
+
+  // colisão com parede
+  if (nx < 0 || nx >= GRID || nz < 0 || nz >= GRID) return gameOver();
+  // colisão com o corpo (ignora a cauda que vai se mover, exceto se vamos crescer)
+  const willGrow = (nx === foodCell.x && nz === foodCell.z);
+  const body = willGrow ? snake : snake.slice(0, -1);
+  if (body.some(s => s.x === nx && s.z === nz)) return gameOver();
+
+  // guarda posições atuais p/ interpolação
+  prevPos = snake.map(s => cellToWorld(s.x, s.z));
+
+  snake.unshift({ x: nx, z: nz });
+  if (willGrow) {
+    score++;
+    elScore.textContent = score;
+    if (score > best) { best = score; elBest.textContent = best; localStorage.setItem('neonSnakeBest', best); }
+    tickInterval = Math.max(MIN_TICK, BASE_TICK - score * 3);
+    ensureMeshes(snake.length);
+    prevPos.unshift(cellToWorld(nx, nz)); // novo segmento já no destino
+    placeFood();
+  } else {
+    snake.pop();
+  }
+}
+
+function gameOver() {
+  state = 'gameover';
+  const isNew = score >= best && score > 0;
+  finalScore.innerHTML = `Você fez <b>${score}</b> ponto${score === 1 ? '' : 's'}` +
+    (isNew ? `<div class="newbest">★ NOVO RECORDE ★</div>` : '');
+  finalScore.style.display = 'block';
+  instructions.style.display = 'none';
+  cta.textContent = 'Pressione ESPAÇO para jogar de novo';
+  overlay.classList.remove('hidden');
+  // flash da cobra em magenta
+  segMeshes.forEach(m => m.visible && (m.material = headMat));
+}
+
+function startGame() {
+  resetGame();
+  state = 'playing';
+  overlay.classList.add('hidden');
+}
+
+// ---------------------------------------------------------------------------
+// Controles
+// ---------------------------------------------------------------------------
+function setDir(name) {
+  const d = DIRS[name];
+  if (!d) return;
+  // bloqueia reversão direta (180°)
+  if (d.x === -direction.x && d.z === -direction.z) return;
+  nextDirection = d;
+}
+
+const KEYMAP = {
+  ArrowUp: 'up', KeyW: 'up',
+  ArrowDown: 'down', KeyS: 'down',
+  ArrowLeft: 'left', KeyA: 'left',
+  ArrowRight: 'right', KeyD: 'right',
+};
+
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Space' || e.code === 'Enter') {
+    e.preventDefault();
+    if (state !== 'playing') startGame();
+    return;
+  }
+  const dir = KEYMAP[e.code];
+  if (dir) {
+    e.preventDefault();
+    if (state === 'playing') setDir(dir);
+  }
+});
+
+document.getElementById('touch').addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  if (state !== 'playing') { startGame(); return; }
+  setDir(b.dataset.dir);
+});
+
+// também permite tocar/clicar no overlay para iniciar
+overlay.addEventListener('click', () => { if (state !== 'playing') startGame(); });
+
+// ---------------------------------------------------------------------------
+// Loop
+// ---------------------------------------------------------------------------
+const timer = new Timer();
+
+function animate() {
+  requestAnimationFrame(animate);
+  timer.update();
+  const dt = timer.getDelta();
+  const t = timer.getElapsed();
+
+  // animação da comida
+  food.rotation.y += dt * 1.6;
+  food.rotation.x += dt * 0.8;
+  const pulse = 1 + Math.sin(t * 4) * 0.12;
+  food.scale.setScalar(pulse);
+  food.position.y = 0.15 + Math.sin(t * 3) * 0.12;
+  foodLight.intensity = 1.2 + Math.sin(t * 4) * 0.4;
+
+  // leve respiração da moldura
+  frame.material.color.setHSL((t * 0.05) % 1, 1, 0.6);
+
+  if (state === 'playing') {
+    acc += dt * 1000;
+    if (acc >= tickInterval) {
+      acc -= tickInterval;
+      step();
+    }
+    // interpolação suave entre células
+    const alpha = Math.min(1, acc / tickInterval);
+    for (let i = 0; i < snake.length; i++) {
+      const target = cellToWorld(snake[i].x, snake[i].z);
+      const from = prevPos[i] || target;
+      segMeshes[i].position.lerpVectors(from, target, alpha);
+      segMeshes[i].position.y = 0;
+    }
+    // a cabeça gira na direção do movimento
+    segMeshes[0].rotation.y = Math.atan2(direction.x, direction.z);
+  }
+
+  composer.render();
+}
+animate();
+
+// ---------------------------------------------------------------------------
+// Resize
+// ---------------------------------------------------------------------------
+window.addEventListener('resize', () => {
+  const w = window.innerWidth, h = window.innerHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+  composer.setSize(w, h);
+});
+
+// inicializa em modo "ready" mostrando uma cobra estática de preview
+resetGame();
+state = 'ready';
+</script>
+</body>
+</html>
