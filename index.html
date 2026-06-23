@@ -42,17 +42,18 @@
   /* ---------- Overlays ---------- */
   #overlay {
     position: fixed; inset: 0;
-    display: flex; flex-direction: column; justify-content: center; align-items: center;
+    display: flex; flex-direction: column; justify-content: flex-end; align-items: center;
     text-align: center;
-    background: radial-gradient(circle at center, rgba(20,2,40,.55), rgba(4,1,8,.92));
-    backdrop-filter: blur(3px);
+    padding-bottom: 7vh;
+    /* gradiente leve só na base — o tabuleiro fica sempre visível e centralizado */
+    background: linear-gradient(to top, rgba(4,1,8,.85), transparent 45%);
     z-index: 20;
     transition: opacity .35s ease;
   }
   #overlay.hidden { opacity: 0; pointer-events: none; }
 
   .title {
-    font-size: clamp(40px, 9vw, 92px);
+    font-size: clamp(28px, 5vw, 52px);
     font-weight: 800;
     letter-spacing: 6px;
     line-height: .95;
@@ -64,7 +65,7 @@
   .subtitle { margin-top: 6px; font-size: 14px; letter-spacing: 8px; text-transform: uppercase; color: var(--purple); }
 
   .panel {
-    margin-top: 34px;
+    margin-top: 16px;
     font-size: 15px; line-height: 1.9; opacity: .85;
   }
   .panel kbd {
@@ -75,7 +76,7 @@
   }
 
   .cta {
-    margin-top: 38px;
+    margin-top: 20px;
     font-size: 18px; letter-spacing: 2px; text-transform: uppercase; font-weight: 600;
     color: #fff;
     animation: pulse 1.6s ease-in-out infinite;
@@ -146,16 +147,19 @@ import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { Timer } from 'three/addons/misc/Timer.js';
 
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
-const GRID = 17;            // tabuleiro GRID x GRID
-const CELL = 1;             // tamanho de cada célula no mundo
-const HALF = (GRID - 1) / 2;
-const BASE_TICK = 220;      // ms por passo no início (mais lento)
-const MIN_TICK = 90;        // velocidade máxima
+const MAX_GRID = 25;        // espaço de coordenadas fixo (extensão máxima do tabuleiro)
+const HALF = (MAX_GRID - 1) / 2;   // centralização fixa — coords da cobra nunca são remapeadas
+const START_MARGIN = 2;     // células bloqueadas em cada lado no início -> área 21x21
+const MAX_MARGIN = 8;       // limite: área mínima 9x9
+const SHRINK_EVERY = 10;    // a cada N comidas, as paredes fecham 1 célula por lado
+const BASE_TICK = 300;      // ms por passo no início (mais lento)
+const MIN_TICK = 80;        // velocidade máxima
+const TICK_STEP = 4;        // aceleração por comida (ms a menos por ponto)
+const STEP_AHEAD = 0.5;     // fração do tick a partir da qual uma curva dispara o passo imediato
 const COLORS = {
   cyan: 0x19f6ff, magenta: 0xff2bd6, purple: 0x9d4bff,
   head: 0x9dffea, food: 0xffe24b,
@@ -196,29 +200,44 @@ scene.add(fill);
 const board = new THREE.Group();
 scene.add(board);
 
-// chão
-const floor = new THREE.Mesh(
-  new THREE.PlaneGeometry(GRID, GRID),
-  new THREE.MeshStandardMaterial({ color: 0x0d0420, metalness: 0.4, roughness: 0.7 })
-);
-floor.rotation.x = -Math.PI / 2;
-floor.position.y = -0.5;
-board.add(floor);
+// arena dinâmica: começa grande e fecha conforme a dificuldade aumenta
+let arenaMargin = START_MARGIN;
+let floor, grid, frame;
 
-// grelha neon
-const grid = new THREE.GridHelper(GRID, GRID, COLORS.cyan, COLORS.purple);
-grid.material.transparent = true;
-grid.material.opacity = 0.35;
-grid.position.y = -0.49;
-board.add(grid);
+function activeSize() { return MAX_GRID - 2 * arenaMargin; }
 
-// moldura neon ao redor do tabuleiro
-const frameGeo = new THREE.EdgesGeometry(new THREE.BoxGeometry(GRID, 1, GRID));
-const frame = new THREE.LineSegments(frameGeo, new THREE.LineBasicMaterial({ color: COLORS.magenta }));
-frame.position.y = 0;
-board.add(frame);
+// (re)constrói chão, grelha e moldura no tamanho ativo atual, centrados na origem
+function buildArena() {
+  for (const obj of [floor, grid, frame]) {
+    if (!obj) continue;
+    board.remove(obj);
+    obj.geometry.dispose();
+    obj.material.dispose();
+  }
+  const size = activeSize();
 
-// helper célula -> mundo (centraliza na origem)
+  floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(size, size),
+    new THREE.MeshStandardMaterial({ color: 0x0d0420, metalness: 0.4, roughness: 0.7 })
+  );
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.y = -0.5;
+  board.add(floor);
+
+  grid = new THREE.GridHelper(size, size, COLORS.cyan, COLORS.purple);
+  grid.material.transparent = true;
+  grid.material.opacity = 0.35;
+  grid.position.y = -0.49;
+  board.add(grid);
+
+  frame = new THREE.LineSegments(
+    new THREE.EdgesGeometry(new THREE.BoxGeometry(size, 1, size)),
+    new THREE.LineBasicMaterial({ color: COLORS.magenta })
+  );
+  board.add(frame);
+}
+
+// helper célula -> mundo (centraliza na origem, espaço de coords fixo)
 function cellToWorld(x, z) {
   return new THREE.Vector3(x - HALF, 0, z - HALF);
 }
@@ -226,7 +245,7 @@ function cellToWorld(x, z) {
 // ---------------------------------------------------------------------------
 // Materiais / geometrias reutilizados
 // ---------------------------------------------------------------------------
-const segGeo = new THREE.BoxGeometry(0.82, 0.82, 0.82);
+const segGeo = new THREE.BoxGeometry(0.55, 0.55, 0.55);
 const bodyMat = new THREE.MeshStandardMaterial({
   color: COLORS.cyan, emissive: COLORS.cyan, emissiveIntensity: 1.1,
   metalness: 0.3, roughness: 0.35,
@@ -272,7 +291,8 @@ const DIRS = {
 };
 let snake = [];          // [{x,z}], cabeça no índice 0
 let segMeshes = [];      // meshes paralelos a snake
-let direction, nextDirection;
+let direction;
+let inputQueue = [];     // até 2 curvas em fila, p/ não perder comandos rápidos
 let foodCell = { x: 0, z: 0 };
 let score = 0;
 let best = Number(localStorage.getItem('neonSnakeBest') || 0);
@@ -302,6 +322,7 @@ function ensureMeshes(n) {
   for (let i = 0; i < segMeshes.length; i++) {
     segMeshes[i].visible = i < n;
     segMeshes[i].material = i === 0 ? headMat : bodyMat;
+    segMeshes[i].scale.setScalar(i === 0 ? 1.25 : 1);  // cabeça destacada
   }
 }
 
@@ -310,10 +331,12 @@ function snakeOccupies(x, z) {
 }
 
 function placeFood() {
+  // 1 célula de recuo das paredes: ao fechar a arena, a cabeça nunca fica para fora
+  const lo = arenaMargin + 1, span = activeSize() - 2;
   let x, z;
   do {
-    x = Math.floor(Math.random() * GRID);
-    z = Math.floor(Math.random() * GRID);
+    x = lo + Math.floor(Math.random() * span);
+    z = lo + Math.floor(Math.random() * span);
   } while (snakeOccupies(x, z));
   foodCell = { x, z };
   const w = cellToWorld(x, z);
@@ -322,11 +345,13 @@ function placeFood() {
 }
 
 function resetGame() {
+  arenaMargin = START_MARGIN;
+  buildArena();
   snake = [];
-  const start = Math.floor(GRID / 2);
+  const start = Math.floor(MAX_GRID / 2);
   for (let i = 0; i < 4; i++) snake.push({ x: start - i, z: start });
   direction = DIRS.right;
-  nextDirection = DIRS.right;
+  inputQueue = [];
   score = 0;
   tickInterval = BASE_TICK;
   acc = 0;
@@ -347,13 +372,14 @@ function syncMeshes(snap) {
 }
 
 function step() {
-  nextDirection && (direction = nextDirection);
+  if (inputQueue.length) direction = inputQueue.shift();
   const head = snake[0];
   const nx = head.x + direction.x;
   const nz = head.z + direction.z;
 
-  // colisão com parede
-  if (nx < 0 || nx >= GRID || nz < 0 || nz >= GRID) return gameOver();
+  // colisão com a parede (limites da arena atual)
+  const lo = arenaMargin, hi = MAX_GRID - 1 - arenaMargin;
+  if (nx < lo || nx > hi || nz < lo || nz > hi) return gameOver();
   // colisão com o corpo (ignora a cauda que vai se mover, exceto se vamos crescer)
   const willGrow = (nx === foodCell.x && nz === foodCell.z);
   const body = willGrow ? snake : snake.slice(0, -1);
@@ -367,9 +393,14 @@ function step() {
     score++;
     elScore.textContent = score;
     if (score > best) { best = score; elBest.textContent = best; localStorage.setItem('neonSnakeBest', best); }
-    tickInterval = Math.max(MIN_TICK, BASE_TICK - score * 3);
+    tickInterval = Math.max(MIN_TICK, BASE_TICK - score * TICK_STEP);
     ensureMeshes(snake.length);
     prevPos.unshift(cellToWorld(nx, nz)); // novo segmento já no destino
+    // a cada 10 comidas as paredes fecham 1 célula por lado (dificuldade sobe)
+    if (score % SHRINK_EVERY === 0 && arenaMargin < MAX_MARGIN) {
+      arenaMargin++;
+      buildArena();
+    }
     placeFood();
   } else {
     snake.pop();
@@ -401,9 +432,13 @@ function startGame() {
 function setDir(name) {
   const d = DIRS[name];
   if (!d) return;
-  // bloqueia reversão direta (180°)
-  if (d.x === -direction.x && d.z === -direction.z) return;
-  nextDirection = d;
+  // valida contra a última direção na fila (ou a atual, se vazia)
+  const ref = inputQueue.length ? inputQueue[inputQueue.length - 1] : direction;
+  if (d.x === -ref.x && d.z === -ref.z) return;   // bloqueia reversão de 180°
+  if (d.x === ref.x && d.z === ref.z) return;     // ignora direção repetida
+  if (inputQueue.length < 2) inputQueue.push(d);
+  // resposta instantânea: se já passou metade do tick, dispara o passo no próximo frame
+  if (state === 'playing' && acc >= tickInterval * STEP_AHEAD) acc = tickInterval;
 }
 
 const KEYMAP = {
@@ -439,13 +474,12 @@ overlay.addEventListener('click', () => { if (state !== 'playing') startGame(); 
 // ---------------------------------------------------------------------------
 // Loop
 // ---------------------------------------------------------------------------
-const timer = new Timer();
+const clock = new THREE.Clock();
 
 function animate() {
   requestAnimationFrame(animate);
-  timer.update();
-  const dt = timer.getDelta();
-  const t = timer.getElapsed();
+  const dt = clock.getDelta();
+  const t = clock.getElapsedTime();
 
   // animação da comida
   food.rotation.y += dt * 1.6;
@@ -478,7 +512,6 @@ function animate() {
 
   composer.render();
 }
-animate();
 
 // ---------------------------------------------------------------------------
 // Resize
@@ -491,9 +524,10 @@ window.addEventListener('resize', () => {
   composer.setSize(w, h);
 });
 
-// inicializa em modo "ready" mostrando uma cobra estática de preview
+// inicializa a arena/cobra e só então arranca o loop de render
 resetGame();
 state = 'ready';
+animate();
 </script>
 </body>
 </html>
