@@ -1,0 +1,160 @@
+import type { Cell, GameAction, GameConfig, GamePhase, GameState } from './types';
+import { DEFAULT_CONFIG } from './config';
+import { createRng } from './rng';
+import { delta } from './direction';
+import { enqueueTurn } from './movement';
+import { hitsBody, hitsWall } from './systems/collision';
+import { freeCells, pickFood } from './systems/food';
+
+/** Build the starting snake: centred, length `initialLength`, facing right. */
+function initialSnake(config: GameConfig): Cell[] {
+  const start = Math.floor(config.maxGrid / 2);
+  const snake: Cell[] = [];
+  for (let i = 0; i < config.initialLength; i++) {
+    snake.push({ x: start - i, z: start });
+  }
+  return snake;
+}
+
+/** Reset board, score, speed and arena while preserving `best`, `config` and RNG. */
+function freshBoard(state: GameState, phase: GamePhase): GameState {
+  const { config } = state;
+  const snake = initialSnake(config);
+  const { food, rng } = pickFood(freeCells(config, config.startMargin, snake), state.rng);
+  return {
+    ...state,
+    phase,
+    snake,
+    direction: 'right',
+    queue: [],
+    food,
+    score: 0,
+    arenaMargin: config.startMargin,
+    tickInterval: config.baseTick,
+    won: false,
+    rng,
+  };
+}
+
+export interface NewGameOptions {
+  readonly config?: GameConfig;
+  readonly seed?: number;
+  readonly best?: number;
+}
+
+/** Create the very first state for a fresh game, in the `ready` phase. */
+export function createInitialState(options: NewGameOptions = {}): GameState {
+  const config = options.config ?? DEFAULT_CONFIG;
+  const seed = options.seed ?? 1;
+  const snake = initialSnake(config);
+  const { food, rng } = pickFood(freeCells(config, config.startMargin, snake), createRng(seed));
+  return {
+    phase: 'ready',
+    snake,
+    direction: 'right',
+    queue: [],
+    food,
+    score: 0,
+    best: options.best ?? 0,
+    arenaMargin: config.startMargin,
+    tickInterval: config.baseTick,
+    won: false,
+    rng,
+    config,
+  };
+}
+
+/** Advance the simulation by one tick. Assumes the caller is in `playing`. */
+function step(state: GameState): GameState {
+  const { config } = state;
+  const direction = state.queue[0] ?? state.direction;
+  const queue = state.queue.slice(1);
+  const head = state.snake[0];
+  if (head === undefined) {
+    return { ...state, phase: 'gameover' };
+  }
+
+  const d = delta(direction);
+  const next: Cell = { x: head.x + d.x, z: head.z + d.z };
+
+  if (hitsWall(next, config, state.arenaMargin)) {
+    return { ...state, phase: 'gameover', direction, queue };
+  }
+
+  const willGrow = next.x === state.food.x && next.z === state.food.z;
+  // The tail moves out of the way unless we are growing into it.
+  const body = willGrow ? state.snake : state.snake.slice(0, -1);
+  if (hitsBody(next, body)) {
+    return { ...state, phase: 'gameover', direction, queue };
+  }
+
+  const grown: Cell[] = [next, ...body];
+  if (!willGrow) {
+    return { ...state, snake: grown, direction, queue };
+  }
+
+  const score = state.score + 1;
+  const best = Math.max(state.best, score);
+  const margin =
+    score % config.shrinkEvery === 0 && state.arenaMargin < config.maxMargin
+      ? state.arenaMargin + 1
+      : state.arenaMargin;
+  const tickInterval = Math.max(config.minTick, config.baseTick - score * config.tickStep);
+
+  const free = freeCells(config, margin, grown);
+  if (free.length === 0) {
+    // Board full — the player has won.
+    return {
+      ...state,
+      snake: grown,
+      direction,
+      queue,
+      score,
+      best,
+      arenaMargin: margin,
+      tickInterval,
+      phase: 'gameover',
+      won: true,
+    };
+  }
+
+  const { food, rng } = pickFood(free, state.rng);
+  return {
+    ...state,
+    snake: grown,
+    direction,
+    queue,
+    score,
+    best,
+    arenaMargin: margin,
+    tickInterval,
+    food,
+    rng,
+  };
+}
+
+/**
+ * The single pure reducer. Every state change flows through here; each branch
+ * is a no-op outside the phase where it applies, so callers never have to
+ * guard before dispatching.
+ */
+export function reduce(state: GameState, action: GameAction): GameState {
+  switch (action.type) {
+    case 'start':
+      return state.phase === 'ready' || state.phase === 'gameover'
+        ? freshBoard(state, 'playing')
+        : state;
+    case 'tick':
+      return state.phase === 'playing' ? step(state) : state;
+    case 'turn':
+      return state.phase === 'playing'
+        ? { ...state, queue: enqueueTurn(state, action.direction) }
+        : state;
+    case 'pause':
+      return state.phase === 'playing' ? { ...state, phase: 'paused' } : state;
+    case 'resume':
+      return state.phase === 'paused' ? { ...state, phase: 'playing' } : state;
+    case 'reset':
+      return freshBoard(state, 'ready');
+  }
+}
