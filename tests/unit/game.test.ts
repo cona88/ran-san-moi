@@ -83,6 +83,20 @@ describe('movement', () => {
     expect(s.direction).toBe('up');
     expect(s.queue).toEqual([]);
   });
+
+  it('never self-collides when the buffer holds a turn opposite the live direction', () => {
+    // facing right; queue 'up' then 'left' (left is valid vs the queued 'up')
+    let s = start({ seed: 1 });
+    s = reduce(s, { type: 'turn', direction: 'up' });
+    s = reduce(s, { type: 'turn', direction: 'left' });
+    expect(s.queue).toEqual(['up', 'left']);
+
+    const length = s.snake.length;
+    s = reduce({ ...s, food: { x: 0, z: 0 } }, { type: 'tick' }); // consume 'up'
+    s = reduce({ ...s, food: { x: 0, z: 0 } }, { type: 'tick' }); // consume 'left'
+    expect(s.phase).toBe('playing');
+    expect(s.snake).toHaveLength(length);
+  });
 });
 
 describe('eating', () => {
@@ -193,6 +207,14 @@ describe('winning', () => {
     expect(won.phase).toBe('gameover');
     expect(won.won).toBe(true);
     expect(won.score).toBe(1);
+    expect(won.best).toBe(1); // best updates even on the winning tick
+
+    // restarting clears the win flag and resets the board, keeping best
+    const restarted = reduce(won, { type: 'start' });
+    expect(restarted.phase).toBe('playing');
+    expect(restarted.won).toBe(false);
+    expect(restarted.score).toBe(0);
+    expect(restarted.best).toBe(1);
   });
 });
 

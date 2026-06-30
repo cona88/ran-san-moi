@@ -7,14 +7,18 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  reporter: process.env.CI ? 'github' : 'list',
+  // In CI, emit inline annotations AND a downloadable HTML report (uploaded as
+  // an artifact); the bare 'github' reporter writes no report directory.
+  reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'list',
   use: {
     baseURL: 'http://localhost:4173',
     trace: 'on-first-retry',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {
-    command: 'pnpm build && pnpm preview --port 4173',
+    // CI already runs an explicit `pnpm build` step, so just preview the
+    // existing dist/ there; locally, build first for a one-command run.
+    command: process.env.CI ? 'pnpm preview --port 4173' : 'pnpm build && pnpm preview --port 4173',
     url: 'http://localhost:4173',
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

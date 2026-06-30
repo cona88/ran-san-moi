@@ -51,8 +51,12 @@ function bootstrap(): void {
     }
 
     if (next.phase !== prev.phase) {
-      if (next.phase === 'playing') overlay.hide();
-      else if (next.phase === 'paused') overlay.showPaused();
+      if (next.phase === 'playing') {
+        // Start fresh from a full tick, but keep the accumulator when merely
+        // resuming from pause so a pause never silently advances the snake.
+        if (prev.phase === 'ready' || prev.phase === 'gameover') acc = 0;
+        overlay.hide();
+      } else if (next.phase === 'paused') overlay.showPaused();
       else if (next.phase === 'ready') overlay.showReady();
       else if (next.phase === 'gameover') {
         overlay.showGameOver(next.score, next.score >= next.best && next.score > 0, next.won);
@@ -113,6 +117,7 @@ function bootstrap(): void {
       best: state.best,
       seed: Date.now() >>> 0,
     });
+    acc = 0;
     renderer.sync(state);
     hud.setScore(state.score);
     hud.setBest(state.best);
