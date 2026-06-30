@@ -188,7 +188,7 @@ canvas {
   top: 22px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 12;
+  z-index: 25;
   pointer-events: auto;
   border: 1px solid rgba(157, 75, 255, 0.4);
   border-radius: 10px;

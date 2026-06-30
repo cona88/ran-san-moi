@@ -1,8 +1,153 @@
 import '../styles/style.css';
 
-// Composition root. Wired up in Phase 5.
-// Placeholder keeps the Vite entry valid while lower layers are built.
-const app = document.getElementById('app');
-if (!app) {
-  throw new Error('Missing #app mount point');
+import type { GameAction, GameState } from '../core/types';
+import { configFor, createInitialState, reduce } from '../core';
+import { GameRenderer } from '../rendering';
+import { Sfx } from '../audio/sfx';
+import { attachKeyboard } from '../input/keyboard';
+import { createTouchControls } from '../input/touch';
+import type { ControlHandlers } from '../input/controls';
+import { Hud } from '../ui/hud';
+import { Overlay } from '../ui/overlay';
+import { SettingsPanel } from '../ui/settings';
+import { loadBest, loadSettings, saveBest, saveSettings, type Settings } from '../platform/storage';
+
+/** Fraction of a tick after which a fresh turn snaps forward for responsiveness. */
+const STEP_AHEAD = 0.5;
+
+function bootstrap(): void {
+  const appRoot = document.getElementById('app');
+  const uiRoot = document.getElementById('ui');
+  if (!appRoot || !uiRoot) {
+    throw new Error('Missing #app or #ui mount point');
+  }
+
+  const settings = loadSettings();
+  let activeDifficulty = settings.difficulty;
+  let state: GameState = createInitialState({
+    config: configFor(settings.difficulty),
+    best: loadBest(),
+    seed: Date.now() >>> 0,
+  });
+
+  const renderer = new GameRenderer(appRoot, state.config);
+  const sfx = new Sfx(settings.sound);
+  const hud = new Hud(uiRoot);
+
+  // --- side-effecting dispatch ------------------------------------------------
+  let acc = 0; // accumulated milliseconds toward the next tick
+
+  function dispatch(action: GameAction): void {
+    const prev = state;
+    state = reduce(state, action);
+    if (state !== prev) onStateChange(prev, state);
+  }
+
+  function onStateChange(prev: GameState, next: GameState): void {
+    if (next.score > prev.score) sfx.eat();
+    if (next.phase === 'gameover' && prev.phase !== 'gameover') {
+      sfx.crash();
+      saveBest(next.best);
+    }
+
+    if (next.phase !== prev.phase) {
+      if (next.phase === 'playing') overlay.hide();
+      else if (next.phase === 'paused') overlay.showPaused();
+      else if (next.phase === 'ready') overlay.showReady();
+      else if (next.phase === 'gameover') {
+        overlay.showGameOver(next.score, next.score >= next.best && next.score > 0, next.won);
+      }
+    }
+
+    hud.setScore(next.score);
+    hud.setBest(next.best);
+
+    // Only re-sync the renderer when the snake actually advanced (a moved array
+    // is a new reference) or on game over — never on a mere queued turn, which
+    // would otherwise freeze the interpolation mid-tick.
+    if (next.snake !== prev.snake || next.phase === 'gameover') {
+      renderer.sync(next);
+    }
+  }
+
+  // --- controls ---------------------------------------------------------------
+  const controls: ControlHandlers = {
+    turn(direction) {
+      if (state.phase !== 'playing') return;
+      dispatch({ type: 'turn', direction });
+      if (acc >= state.tickInterval * STEP_AHEAD) acc = state.tickInterval;
+    },
+    primary() {
+      sfx.resume();
+      if (state.phase === 'paused') dispatch({ type: 'resume' });
+      else if (state.phase !== 'playing') dispatch({ type: 'start' });
+    },
+    togglePause() {
+      if (state.phase === 'playing') dispatch({ type: 'pause' });
+      else if (state.phase === 'paused') dispatch({ type: 'resume' });
+    },
+  };
+
+  const overlay = new Overlay(uiRoot, controls.primary);
+  const detachKeyboard = attachKeyboard(controls);
+  createTouchControls(uiRoot, controls);
+
+  new SettingsPanel(uiRoot, settings, {
+    onChange(next: Settings) {
+      saveSettings(next);
+      sfx.setEnabled(next.sound);
+      if (next.difficulty !== activeDifficulty) {
+        activeDifficulty = next.difficulty;
+        startFreshGame(next);
+      }
+    },
+    onVisibilityChange(open) {
+      if (open && state.phase === 'playing') dispatch({ type: 'pause' });
+    },
+  });
+
+  /** Rebuild the game when the difficulty changes; returns to the ready screen. */
+  function startFreshGame(next: Settings): void {
+    state = createInitialState({
+      config: configFor(next.difficulty),
+      best: state.best,
+      seed: Date.now() >>> 0,
+    });
+    renderer.sync(state);
+    hud.setScore(state.score);
+    hud.setBest(state.best);
+    overlay.showReady();
+  }
+
+  // --- initial paint ----------------------------------------------------------
+  renderer.sync(state);
+  hud.setScore(state.score);
+  hud.setBest(state.best);
+  overlay.showReady();
+
+  // --- main loop (fixed-timestep simulation, interpolated render) -------------
+  let lastFrame = performance.now();
+
+  function frame(now: number): void {
+    requestAnimationFrame(frame);
+    const deltaMs = Math.min(now - lastFrame, 250); // clamp huge gaps (tab refocus)
+    lastFrame = now;
+
+    if (state.phase === 'playing') {
+      acc += deltaMs;
+      while (state.phase === 'playing' && acc >= state.tickInterval) {
+        acc -= state.tickInterval;
+        dispatch({ type: 'tick' });
+      }
+    }
+
+    const alpha = state.phase === 'playing' ? Math.min(1, acc / state.tickInterval) : 1;
+    renderer.draw(alpha, now / 1000, deltaMs / 1000, state);
+  }
+  requestAnimationFrame(frame);
+
+  window.addEventListener('resize', () => renderer.resize());
+  window.addEventListener('beforeunload', detachKeyboard);
 }
+
+bootstrap();

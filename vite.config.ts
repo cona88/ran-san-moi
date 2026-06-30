@@ -7,6 +7,8 @@ export default defineConfig({
   build: {
     target: 'es2022',
     sourcemap: true,
+    // Three.js alone is ~500 kB; that is the floor for a WebGL game, not bloat.
+    chunkSizeWarningLimit: 700,
   },
   test: {
     environment: 'node',
