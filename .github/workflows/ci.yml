@@ -57,6 +57,6 @@ jobs:
           if-no-files-found: ignore
 
 # CI here is the quality gate only. Deployment is on Vercel
-# (https://snake-3d-lyart.vercel.app) via `vercel --prod`, or automatically once
-# the repo is connected to Vercel's Git integration (production on main,
-# previews on PRs).
+# (https://snake-3d-lyart.vercel.app): the repo is connected to Vercel's Git
+# integration, so pushes to main deploy to production and PRs get previews
+# automatically (`vercel --prod` also deploys manually).
