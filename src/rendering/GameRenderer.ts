@@ -25,7 +25,10 @@ export class GameRenderer {
     private readonly config: GameConfig,
   ) {
     this.half = halfOf(config.maxGrid);
-    this.rig = new SceneRig(container);
+    // Fit the camera to the largest board the game ever shows (the start size),
+    // with a small margin, so framing stays constant as the arena shrinks.
+    const maxHalfExtent = (activeSize(config, config.startMargin) / 2) * 1.08;
+    this.rig = new SceneRig(container, maxHalfExtent);
     this.rig.scene.add(this.board.group);
     this.snakeView = new SnakeView(this.rig.scene, this.half);
     this.foodView = new FoodView(this.rig.scene, this.half);

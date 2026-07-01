@@ -5,7 +5,7 @@ import { configFor, createInitialState, reduce } from '../core';
 import { GameRenderer } from '../rendering';
 import { Sfx } from '../audio/sfx';
 import { attachKeyboard } from '../input/keyboard';
-import { createTouchControls } from '../input/touch';
+import { attachSwipe, createTouchControls } from '../input/touch';
 import type { ControlHandlers } from '../input/controls';
 import { Hud } from '../ui/hud';
 import { Overlay } from '../ui/overlay';
@@ -95,6 +95,7 @@ function bootstrap(): void {
   const overlay = new Overlay(uiRoot, controls.primary);
   const detachKeyboard = attachKeyboard(controls);
   createTouchControls(uiRoot, controls);
+  attachSwipe(appRoot, controls);
 
   new SettingsPanel(uiRoot, settings, {
     onChange(next: Settings) {
@@ -151,7 +152,12 @@ function bootstrap(): void {
   }
   requestAnimationFrame(frame);
 
-  window.addEventListener('resize', () => renderer.resize());
+  // Re-fit on every event that can change the viewport: window resize, device
+  // rotation, and the mobile URL bar showing/hiding (visualViewport).
+  const handleResize = (): void => renderer.resize();
+  window.addEventListener('resize', handleResize);
+  window.addEventListener('orientationchange', handleResize);
+  window.visualViewport?.addEventListener('resize', handleResize);
   window.addEventListener('beforeunload', detachKeyboard);
 }
 

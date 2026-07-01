@@ -17,6 +17,8 @@ body {
   height: 100%;
   overflow: hidden;
   background: var(--bg);
+  /* stop iOS rubber-band / pull-to-refresh over the game */
+  overscroll-behavior: none;
 }
 
 body {
@@ -28,6 +30,7 @@ body {
   color: #fff;
   -webkit-user-select: none;
   user-select: none;
+  -webkit-touch-callout: none;
   touch-action: none;
 }
 
@@ -49,7 +52,8 @@ canvas {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  padding: 22px 28px;
+  padding: max(22px, env(safe-area-inset-top)) max(28px, env(safe-area-inset-right)) 0
+    max(28px, env(safe-area-inset-left));
   pointer-events: none;
   z-index: 10;
 }
@@ -185,7 +189,7 @@ canvas {
 /* ---------- Settings ---------- */
 #settings-btn {
   position: fixed;
-  top: 22px;
+  top: max(22px, env(safe-area-inset-top));
   left: 50%;
   transform: translateX(-50%);
   z-index: 25;
@@ -291,7 +295,7 @@ canvas {
 /* ---------- Mobile controls ---------- */
 #touch {
   position: fixed;
-  bottom: 26px;
+  bottom: calc(26px + env(safe-area-inset-bottom));
   left: 50%;
   transform: translateX(-50%);
   display: none;
@@ -336,5 +340,75 @@ canvas {
 @media (pointer: coarse) {
   #touch {
     display: grid;
+  }
+}
+
+/* ---------- Responsive: phones ---------- */
+@media (max-width: 640px) {
+  #hud {
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+  }
+  .value {
+    font-size: 26px;
+  }
+  .stat {
+    font-size: 11px;
+    letter-spacing: 2px;
+  }
+  .subtitle {
+    letter-spacing: 5px;
+  }
+  .panel {
+    font-size: 13px;
+    line-height: 1.7;
+  }
+  .cta {
+    font-size: 16px;
+  }
+  #finalScore {
+    font-size: 18px;
+  }
+  #settings-btn {
+    font-size: 12px;
+    padding: 7px 12px;
+  }
+  #touch {
+    grid-template-columns: repeat(3, 58px);
+    grid-template-rows: repeat(2, 58px);
+  }
+}
+
+@media (max-width: 380px) {
+  .value {
+    font-size: 22px;
+  }
+  .panel {
+    font-size: 12px;
+  }
+}
+
+/* ---------- Responsive: landscape phones (short viewport) ---------- */
+@media (orientation: landscape) and (max-height: 480px) {
+  #hud {
+    padding-top: max(10px, env(safe-area-inset-top));
+  }
+  .value {
+    font-size: 22px;
+  }
+  #overlay {
+    padding-bottom: 4vh;
+  }
+  .panel {
+    line-height: 1.5;
+  }
+  /* move the d-pad to the thumb-friendly bottom-right corner */
+  #touch {
+    left: auto;
+    transform: none;
+    right: calc(16px + env(safe-area-inset-right));
+    bottom: calc(14px + env(safe-area-inset-bottom));
+    grid-template-columns: repeat(3, 52px);
+    grid-template-rows: repeat(2, 52px);
   }
 }
