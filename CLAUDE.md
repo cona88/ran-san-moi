@@ -78,6 +78,8 @@ tests/
 ## Conventions
 
 - Strict TypeScript (`noUncheckedIndexedAccess` on) — guard array access.
-- A Husky pre-commit hook runs `lint-staged` + `typecheck`; CI runs lint,
-  typecheck, coverage, build and E2E, then deploys to GitHub Pages on `main`.
+- A Husky pre-commit hook runs `lint-staged` + `typecheck`; CI (GitHub Actions)
+  runs lint, typecheck, coverage, build and E2E as the quality gate. Deployment
+  is on Vercel — live at https://snake-3d-lyart.vercel.app (`vercel --prod`, or
+  automatic once the repo is connected to Vercel's Git integration).
 - Keep `core/` free of browser/Three.js imports — that boundary is the point.

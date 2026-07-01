@@ -6,6 +6,9 @@
 </p>
 
 <p align="center">
+  <a href="https://snake-3d-lyart.vercel.app">
+    <img alt="Live demo" src="https://img.shields.io/badge/demo-live-000000?logo=vercel&logoColor=white" />
+  </a>
   <a href="https://github.com/samuel-cabral/snake-3d/actions/workflows/ci.yml">
     <img alt="CI" src="https://github.com/samuel-cabral/snake-3d/actions/workflows/ci.yml/badge.svg" />
   </a>
@@ -19,7 +22,7 @@
   <img src="docs/media/gameplay.png" alt="Neon Snake 3D gameplay" width="640" />
 </p>
 
-<p align="center"><strong>▶ Play it: https://samuel-cabral.github.io/snake-3d/</strong></p>
+<p align="center"><strong>▶ Play it live: https://snake-3d-lyart.vercel.app</strong></p>
 
 ---
 
@@ -42,7 +45,7 @@ trivially testable and easy to evolve:
   depending on the core but never the other way around.
 - **A real toolchain:** TypeScript (strict, `noUncheckedIndexedAccess`),
   Vitest with coverage gates, Playwright E2E, ESLint + Prettier, a Husky
-  pre-commit hook, and a GitHub Actions pipeline that ships to GitHub Pages.
+  pre-commit hook, a GitHub Actions quality gate, and deployment to Vercel.
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full picture and
 [`docs/adr/`](docs/adr) for the decisions behind it.

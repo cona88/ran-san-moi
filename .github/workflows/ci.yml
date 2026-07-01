@@ -56,5 +56,7 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-# Deployment is handled by Vercel's Git integration (auto-builds every push to
-# main as production, and every PR as a preview). CI here is the quality gate.
+# CI here is the quality gate only. Deployment is on Vercel
+# (https://snake-3d-lyart.vercel.app) via `vercel --prod`, or automatically once
+# the repo is connected to Vercel's Git integration (production on main,
+# previews on PRs).
