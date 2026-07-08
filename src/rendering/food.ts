@@ -6,7 +6,7 @@ import { cellToWorld } from './world';
 /** The pulsing food orb and the point light that follows it. */
 export class FoodView {
   private readonly mesh: Mesh<IcosahedronGeometry, MeshStandardMaterial>;
-  private readonly light = new PointLight(COLORS.food, 1.2, 6);
+  private readonly light = new PointLight(COLORS.food, 0.9, 4);
 
   constructor(
     private readonly scene: Scene,
@@ -17,7 +17,7 @@ export class FoodView {
       new MeshStandardMaterial({
         color: COLORS.food,
         emissive: COLORS.food,
-        emissiveIntensity: 1.8,
+        emissiveIntensity: 1.3,
         metalness: 0.1,
         roughness: 0.2,
       }),
@@ -39,7 +39,7 @@ export class FoodView {
     this.mesh.rotation.x += delta * 0.8;
     this.mesh.scale.setScalar(1 + Math.sin(elapsed * 4) * 0.12);
     this.mesh.position.y = 0.15 + Math.sin(elapsed * 3) * 0.12;
-    this.light.intensity = 1.2 + Math.sin(elapsed * 4) * 0.4;
+    this.light.intensity = 0.9 + Math.sin(elapsed * 4) * 0.3;
   }
 
   dispose(): void {

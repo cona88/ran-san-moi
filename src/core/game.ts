@@ -3,7 +3,7 @@ import { DEFAULT_CONFIG } from './config';
 import { createRng } from './rng';
 import { delta } from './direction';
 import { enqueueTurn } from './movement';
-import { hitsBody, hitsWall } from './systems/collision';
+import { allInsideWalls, hitsBody, hitsWall } from './systems/collision';
 import { freeCells, pickFood } from './systems/food';
 
 /** Build the starting snake: centred, length `initialLength`, facing right. */
@@ -30,6 +30,7 @@ function freshBoard(state: GameState, phase: GamePhase): GameState {
     food,
     score: 0,
     arenaMargin: config.startMargin,
+    pendingShrink: false,
     tickInterval: config.baseTick,
     won: false,
     rng,
@@ -57,6 +58,7 @@ export function createInitialState(options: NewGameOptions = {}): GameState {
     score: 0,
     best: options.best ?? 0,
     arenaMargin: config.startMargin,
+    pendingShrink: false,
     tickInterval: config.baseTick,
     won: false,
     rng,
@@ -89,19 +91,33 @@ function step(state: GameState): GameState {
   }
 
   const grown: Cell[] = [next, ...body];
+
+  // Commit a pending shrink once the whole snake fits inside the tighter
+  // walls; until then the old margin stays live so a shrink can never kill.
+  let arenaMargin = state.arenaMargin;
+  let pendingShrink = state.pendingShrink;
+  if (pendingShrink && allInsideWalls(grown, config, arenaMargin + 1)) {
+    arenaMargin += 1;
+    pendingShrink = false;
+  }
+
   if (!willGrow) {
-    return { ...state, snake: grown, direction, queue };
+    return { ...state, snake: grown, direction, queue, arenaMargin, pendingShrink };
   }
 
   const score = state.score + 1;
   const best = Math.max(state.best, score);
-  const margin =
-    score % config.shrinkEvery === 0 && state.arenaMargin < config.maxMargin
-      ? state.arenaMargin + 1
-      : state.arenaMargin;
+  // Arm (never immediately apply) the next shrink so the renderer can warn
+  // first; a threshold reached while one is pending is absorbed by the flag.
+  if (score % config.shrinkEvery === 0 && arenaMargin < config.maxMargin && !pendingShrink) {
+    pendingShrink = true;
+  }
   const tickInterval = Math.max(config.minTick, config.baseTick - score * config.tickStep);
 
-  const free = freeCells(config, margin, grown);
+  // While pending, spawn inside the future bounds so food never lands in the
+  // soon-to-close band and the player is pulled inward.
+  const spawnMargin = pendingShrink ? arenaMargin + 1 : arenaMargin;
+  const free = freeCells(config, spawnMargin, grown);
   if (free.length === 0) {
     // Board full — the player has won.
     return {
@@ -111,7 +127,8 @@ function step(state: GameState): GameState {
       queue,
       score,
       best,
-      arenaMargin: margin,
+      arenaMargin,
+      pendingShrink,
       tickInterval,
       phase: 'gameover',
       won: true,
@@ -126,7 +143,8 @@ function step(state: GameState): GameState {
     queue,
     score,
     best,
-    arenaMargin: margin,
+    arenaMargin,
+    pendingShrink,
     tickInterval,
     food,
     rng,

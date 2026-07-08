@@ -67,6 +67,11 @@ export interface GameState {
   readonly best: number;
   /** Cells currently walled off on each side. */
   readonly arenaMargin: number;
+  /**
+   * True while a wall shrink is armed but waiting for the whole snake to fit
+   * inside the tighter bounds. The live walls stay at `arenaMargin` until then.
+   */
+  readonly pendingShrink: boolean;
   /** Current tick length in milliseconds. */
   readonly tickInterval: number;
   /** True when the snake filled the board — a win, not a crash. */

@@ -12,4 +12,10 @@ describe('config', () => {
     expect(easy.baseTick).toBeGreaterThan(hard.baseTick);
     expect(easy.shrinkEvery).toBeGreaterThan(hard.shrinkEvery);
   });
+
+  it('accelerates noticeably per food, scaling with difficulty', () => {
+    expect(configFor('easy').tickStep).toBe(5);
+    expect(configFor('normal').tickStep).toBe(7);
+    expect(configFor('hard').tickStep).toBe(8);
+  });
 });

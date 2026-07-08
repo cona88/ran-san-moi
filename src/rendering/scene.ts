@@ -14,7 +14,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { COLORS } from './palette';
-import { cameraFitDistance } from './cameraFit';
+import { cameraFitDistance, cameraTargetZ } from './cameraFit';
 
 const FOV = 50;
 const FOG_NEAR = 18;
@@ -69,7 +69,7 @@ export class SceneRig {
 
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
-    this.composer.addPass(new UnrealBloomPass(new Vector2(w, h), 0.9, 0.6, 0.15));
+    this.composer.addPass(new UnrealBloomPass(new Vector2(w, h), 0.55, 0.5, 0.25));
 
     this.fitCamera();
   }
@@ -100,7 +100,10 @@ export class SceneRig {
 
     const aspect = w / h;
     this.camera.position.copy(this.cameraDir).multiplyScalar(distance);
-    this.camera.lookAt(0, 0, 0);
+    // Aim past the origin so the near and far board edges are vertically
+    // balanced in the frame — looking dead at the centre crops the bottom row.
+    const targetZ = cameraTargetZ(distance, this.fitHalfExtent, this.cameraDir.y, this.cameraDir.z);
+    this.camera.lookAt(0, 0, targetZ);
     this.camera.aspect = aspect;
     this.camera.updateProjectionMatrix();
 
