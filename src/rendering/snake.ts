@@ -27,14 +27,14 @@ export class SnakeView {
   private readonly bodyMaterial = new MeshStandardMaterial({
     color: COLORS.cyan,
     emissive: COLORS.cyan,
-    emissiveIntensity: 1.1,
+    emissiveIntensity: 0.85,
     metalness: 0.3,
     roughness: 0.35,
   });
   private readonly headMaterial = new MeshStandardMaterial({
     color: COLORS.head,
     emissive: COLORS.cyan,
-    emissiveIntensity: 1.6,
+    emissiveIntensity: 1.2,
     metalness: 0.2,
     roughness: 0.25,
   });

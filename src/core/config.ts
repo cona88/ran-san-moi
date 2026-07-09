@@ -8,14 +8,14 @@ const BASE: GameConfig = {
   shrinkEvery: 10,
   baseTick: 300,
   minTick: 80,
-  tickStep: 4,
+  tickStep: 7,
   initialLength: 4,
 };
 
 const PRESETS: Record<Difficulty, GameConfig> = {
-  easy: { ...BASE, baseTick: 360, tickStep: 3, shrinkEvery: 14, maxMargin: 6 },
+  easy: { ...BASE, baseTick: 360, tickStep: 5, shrinkEvery: 14, maxMargin: 6 },
   normal: { ...BASE },
-  hard: { ...BASE, baseTick: 220, minTick: 70, tickStep: 5, shrinkEvery: 7 },
+  hard: { ...BASE, baseTick: 220, minTick: 70, tickStep: 8, shrinkEvery: 7 },
 };
 
 /** The default ruleset (normal difficulty). */

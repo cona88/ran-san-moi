@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Direction, GameState } from '../../src/core/types';
 import { DEFAULT_CONFIG } from '../../src/core/config';
 import { createInitialState, reduce } from '../../src/core/game';
+import { innerBounds } from '../../src/core/systems/arena';
 
 function start(options?: Parameters<typeof createInitialState>[0]): GameState {
   return reduce(createInitialState(options), { type: 'start' });
@@ -130,21 +131,156 @@ describe('eating', () => {
 });
 
 describe('arena shrink', () => {
-  it('closes the walls every shrinkEvery foods', () => {
-    const config = {
-      ...DEFAULT_CONFIG,
-      maxGrid: 11,
-      startMargin: 1,
-      maxMargin: 3,
-      shrinkEvery: 2,
-      initialLength: 3,
-    };
+  const config = {
+    ...DEFAULT_CONFIG,
+    maxGrid: 11,
+    startMargin: 1,
+    maxMargin: 3,
+    shrinkEvery: 2,
+    initialLength: 3,
+  };
+
+  it('arms a pending shrink at the threshold instead of closing instantly', () => {
     let s = start({ seed: 1, config });
     expect(s.arenaMargin).toBe(1);
     s = eatAhead(s);
-    expect(s.arenaMargin).toBe(1); // score 1
+    expect(s.pendingShrink).toBe(false); // score 1
     s = eatAhead(s);
-    expect(s.arenaMargin).toBe(2); // score 2 -> shrink
+    expect(s.score).toBe(2); // threshold reached
+    expect(s.arenaMargin).toBe(1); // walls have not moved yet
+    expect(s.pendingShrink).toBe(true);
+  });
+
+  it('commits the shrink once the whole snake fits the tighter bounds', () => {
+    let s = start({ seed: 1, config });
+    s = eatAhead(s);
+    s = eatAhead(s); // armed; the snake already sits inside the future walls
+    s = reduce({ ...s, food: { x: 0, z: 0 } }, { type: 'tick' });
+    expect(s.arenaMargin).toBe(2);
+    expect(s.pendingShrink).toBe(false);
+  });
+
+  it('waits while any segment still sits in the closing band', () => {
+    const base = start({ seed: 1, config });
+    const snake = [
+      { x: 3, z: 5 }, // head
+      { x: 2, z: 5 },
+      { x: 1, z: 5 }, // inside the old walls, outside the future ones
+      { x: 1, z: 4 },
+    ];
+    const s: GameState = {
+      ...base,
+      snake,
+      direction: 'right',
+      queue: [],
+      food: { x: 0, z: 0 },
+      arenaMargin: 1,
+      pendingShrink: true,
+    };
+    const next = reduce(s, { type: 'tick' });
+    expect(next.phase).toBe('playing');
+    expect(next.arenaMargin).toBe(1);
+    expect(next.pendingShrink).toBe(true);
+  });
+
+  it('never kills the snake in the closing band while the shrink is pending', () => {
+    const base = start({ seed: 1, config });
+    const snake = [
+      { x: 8, z: 5 }, // head; next cell (9) is legal for margin 1, illegal for margin 2
+      { x: 7, z: 5 },
+      { x: 6, z: 5 },
+    ];
+    const s: GameState = {
+      ...base,
+      snake,
+      direction: 'right',
+      queue: [],
+      food: { x: 0, z: 0 },
+      arenaMargin: 1,
+      pendingShrink: true,
+    };
+    const next = reduce(s, { type: 'tick' });
+    expect(next.phase).toBe('playing');
+    expect(next.arenaMargin).toBe(1);
+    expect(next.pendingShrink).toBe(true);
+  });
+
+  it('spawns food inside the future inner bounds while pending', () => {
+    let s = start({ seed: 1, config });
+    s = eatAhead(s);
+    s = eatAhead(s); // armed
+    expect(s.pendingShrink).toBe(true);
+    const { lo, hi } = innerBounds(config, s.arenaMargin + 1);
+    expect(s.food.x).toBeGreaterThanOrEqual(lo);
+    expect(s.food.x).toBeLessThanOrEqual(hi);
+    expect(s.food.z).toBeGreaterThanOrEqual(lo);
+    expect(s.food.z).toBeLessThanOrEqual(hi);
+  });
+
+  it('absorbs a second threshold while one shrink is pending', () => {
+    const cfg = { ...config, shrinkEvery: 1 };
+    const base = start({ seed: 1, config: cfg });
+    const snake = [
+      { x: 3, z: 5 }, // head
+      { x: 2, z: 5 },
+      { x: 1, z: 5 }, // this column keeps the snake in the band for a while
+      { x: 1, z: 4 },
+      { x: 1, z: 3 },
+    ];
+    let s: GameState = {
+      ...base,
+      snake,
+      direction: 'right',
+      queue: [],
+      food: { x: 0, z: 0 },
+      arenaMargin: 1,
+      pendingShrink: false,
+      score: 0,
+    };
+    s = eatAhead(s); // score 1 -> arms
+    expect(s.pendingShrink).toBe(true);
+    s = eatAhead(s); // score 2 -> another threshold, absorbed by the pending flag
+    expect(s.pendingShrink).toBe(true);
+    expect(s.arenaMargin).toBe(1);
+    // walk the tail out of the band; the single pending shrink then commits
+    s = reduce({ ...s, food: { x: 0, z: 0 } }, { type: 'tick' });
+    s = reduce({ ...s, food: { x: 0, z: 0 } }, { type: 'tick' });
+    s = reduce({ ...s, food: { x: 0, z: 0 } }, { type: 'tick' });
+    expect(s.arenaMargin).toBe(2); // rose by exactly one despite two thresholds
+    expect(s.pendingShrink).toBe(false);
+  });
+
+  it('does not arm beyond maxMargin', () => {
+    const base = start({ seed: 1, config });
+    const snake = [
+      { x: 5, z: 5 },
+      { x: 4, z: 5 },
+      { x: 3, z: 5 },
+    ];
+    const s: GameState = {
+      ...base,
+      snake,
+      direction: 'right',
+      queue: [],
+      food: { x: 0, z: 0 },
+      arenaMargin: config.maxMargin,
+      pendingShrink: false,
+      score: 1,
+    };
+    const next = eatAhead(s); // score 2 hits the threshold, but the arena is as tight as it gets
+    expect(next.score).toBe(2);
+    expect(next.pendingShrink).toBe(false);
+    expect(next.arenaMargin).toBe(config.maxMargin);
+  });
+
+  it('start and reset clear a pending shrink', () => {
+    let s = start({ seed: 1, config });
+    s = eatAhead(s);
+    s = eatAhead(s); // armed
+    expect(s.pendingShrink).toBe(true);
+    const reset = reduce(s, { type: 'reset' });
+    expect(reset.pendingShrink).toBe(false);
+    expect(reset.arenaMargin).toBe(config.startMargin);
   });
 });
 

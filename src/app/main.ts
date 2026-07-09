@@ -9,6 +9,7 @@ import { attachSwipe, createTouchControls } from '../input/touch';
 import type { ControlHandlers } from '../input/controls';
 import { Hud } from '../ui/hud';
 import { Overlay } from '../ui/overlay';
+import { ScorePopups } from '../ui/popups';
 import { SettingsPanel } from '../ui/settings';
 import { loadBest, loadSettings, saveBest, saveSettings, type Settings } from '../platform/storage';
 
@@ -33,6 +34,7 @@ function bootstrap(): void {
   const renderer = new GameRenderer(appRoot, state.config);
   const sfx = new Sfx(settings.sound);
   const hud = new Hud(uiRoot);
+  const popups = new ScorePopups(uiRoot);
 
   // --- side-effecting dispatch ------------------------------------------------
   let acc = 0; // accumulated milliseconds toward the next tick
@@ -44,7 +46,12 @@ function bootstrap(): void {
   }
 
   function onStateChange(prev: GameState, next: GameState): void {
-    if (next.score > prev.score) sfx.eat();
+    if (next.score > prev.score) {
+      sfx.eat();
+      // Celebrate at the spot of the food that was just eaten (prev.food).
+      const spot = renderer.projectCell(prev.food);
+      if (spot) popups.spawn(spot.x, spot.y);
+    }
     if (next.phase === 'gameover' && prev.phase !== 'gameover') {
       sfx.crash();
       saveBest(next.best);

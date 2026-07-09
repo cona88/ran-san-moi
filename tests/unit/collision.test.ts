@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_CONFIG } from '../../src/core/config';
-import { hitsBody, hitsWall } from '../../src/core/systems/collision';
+import { allInsideWalls, hitsBody, hitsWall } from '../../src/core/systems/collision';
 
 describe('collision', () => {
   const config = DEFAULT_CONFIG;
@@ -17,6 +17,16 @@ describe('collision', () => {
     expect(hitsWall({ x: 2, z: 2 }, config, 2)).toBe(false);
     expect(hitsWall({ x: 22, z: 22 }, config, 2)).toBe(false);
     expect(hitsWall({ x: 12, z: 12 }, config, 2)).toBe(false);
+  });
+
+  it('checks whole bodies against the walls', () => {
+    const inside = [
+      { x: 5, z: 5 },
+      { x: 4, z: 5 },
+    ];
+    expect(allInsideWalls(inside, config, 2)).toBe(true);
+    expect(allInsideWalls([...inside, { x: 1, z: 5 }], config, 2)).toBe(false);
+    expect(allInsideWalls([], config, 2)).toBe(true);
   });
 
   it('detects body overlap', () => {

@@ -87,6 +87,35 @@ canvas {
   text-shadow: 0 0 14px var(--magenta);
 }
 
+/* ---------- Score popups ---------- */
+#popups {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 18; /* above HUD and touch controls, below the phase overlay */
+}
+
+.score-popup {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #ffe24b;
+  text-shadow: 0 0 10px rgba(255, 226, 75, 0.9);
+  animation: popup-float 0.9s ease-out forwards;
+}
+
+@keyframes popup-float {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, -100%) translateY(-46px);
+  }
+}
+
 /* ---------- Overlays ---------- */
 #overlay {
   position: fixed;

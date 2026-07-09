@@ -1,11 +1,12 @@
-import type { GameConfig, GameState } from '../core/types';
+import { Vector3 } from 'three';
+import type { Cell, GameConfig, GameState } from '../core/types';
 import { activeSize } from '../core/systems/arena';
 import { Board } from './board';
 import { FoodView } from './food';
 import { COLORS } from './palette';
 import { SceneRig } from './scene';
 import { SnakeView } from './snake';
-import { halfOf } from './world';
+import { cellToWorld, halfOf } from './world';
 
 /**
  * Facade over the rendering layer. The app calls {@link sync} once per logic
@@ -19,6 +20,8 @@ export class GameRenderer {
   private readonly foodView: FoodView;
   private readonly half: number;
   private renderedMargin = -1;
+  private renderedPending = false;
+  private readonly projected = new Vector3(); // scratch for projectCell
 
   constructor(
     container: HTMLElement,
@@ -39,6 +42,16 @@ export class GameRenderer {
     if (state.arenaMargin !== this.renderedMargin) {
       this.board.rebuild(activeSize(this.config, state.arenaMargin));
       this.renderedMargin = state.arenaMargin;
+      this.renderedPending = false; // rebuild disposes any preview frame
+    }
+    const pending = state.pendingShrink && state.phase !== 'gameover';
+    if (pending !== this.renderedPending) {
+      if (pending) {
+        this.board.showShrinkPreview(activeSize(this.config, state.arenaMargin + 1));
+      } else {
+        this.board.hideShrinkPreview();
+      }
+      this.renderedPending = pending;
     }
     this.snakeView.onTick(state);
     this.foodView.setCell(state.food);
@@ -55,6 +68,17 @@ export class GameRenderer {
       this.board.animate(elapsed);
     }
     this.rig.render();
+  }
+
+  /** Project a grid cell to viewport pixels; null when behind the camera. */
+  projectCell(cell: Cell): { x: number; y: number } | null {
+    cellToWorld(cell.x, cell.z, this.half, this.projected);
+    this.projected.project(this.rig.camera);
+    if (this.projected.z > 1) return null;
+    return {
+      x: (this.projected.x * 0.5 + 0.5) * window.innerWidth,
+      y: (-this.projected.y * 0.5 + 0.5) * window.innerHeight,
+    };
   }
 
   resize(): void {
