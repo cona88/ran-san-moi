@@ -57,3 +57,33 @@ export function loadSettings(): Settings {
 export function saveSettings(settings: Settings): void {
   safeSet(SETTINGS_KEY, JSON.stringify(settings));
 }
+
+const PLAYER_ID_KEY = 'neonSnakePlayerId';
+const NICKNAME_KEY = 'neonSnakeNickname';
+const NICKNAME_MAX = 16;
+
+export function loadPlayerId(): string {
+  const existing = safeGet(PLAYER_ID_KEY);
+  if (existing) return existing;
+  const id = crypto.randomUUID();
+  safeSet(PLAYER_ID_KEY, id);
+  return id;
+}
+
+export function loadNickname(): string | null {
+  return safeGet(NICKNAME_KEY);
+}
+
+export function saveNickname(nickname: string): void {
+  safeSet(NICKNAME_KEY, nickname.slice(0, NICKNAME_MAX));
+}
+
+/** The player's nickname, generating and persisting a default if none is set. */
+export function loadOrCreateNickname(): string {
+  const existing = loadNickname();
+  if (existing) return existing;
+  const suffix = loadPlayerId().slice(0, 4);
+  const generated = `Snake-${suffix}`;
+  saveNickname(generated);
+  return generated;
+}
