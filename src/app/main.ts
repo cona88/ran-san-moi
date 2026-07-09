@@ -91,8 +91,9 @@ function bootstrap(): void {
       else if (next.phase === 'gameover') {
         overlay.showGameOver(next.score, next.score >= next.best && next.score > 0, next.won);
         const mode: LeaderboardMode = isDailyRun ? 'daily' : 'alltime';
+        const submissionDifficulty = isDailyRun ? 'normal' : activeDifficulty;
         const nickname = loadOrCreateNickname();
-        void submitScore(mode, activeDifficulty, next.score, { id: playerId, nickname }).then(
+        void submitScore(mode, submissionDifficulty, next.score, { id: playerId, nickname }).then(
           ({ rank }) => {
             const unlocked = loadUnlockedAchievements();
             achievementTracker.applyUnlocks(evaluateLeaderboardAchievements(rank, unlocked));
@@ -129,6 +130,8 @@ function bootstrap(): void {
       if (state.phase === 'paused') dispatch({ type: 'resume' });
       else if (state.phase !== 'playing') {
         isDailyRun = false;
+        const config = configFor(activeDifficulty);
+        if (state.config !== config) state = { ...state, config };
         dispatch({ type: 'start' });
       }
     },
@@ -139,6 +142,7 @@ function bootstrap(): void {
   };
 
   function onDailyStart(): void {
+    achievementTracker.resetForNewRun(state.best);
     overlay.hide();
     renderer.sync(state);
     toolbar.setScore(state.score);

@@ -44,6 +44,18 @@ export class AchievementTracker {
     this.applyUnlocks(newlyUnlockedIds);
   }
 
+  /**
+   * Resets cross-run state for a fresh run that starts outside `dispatch`
+   * (currently only the daily challenge, which bypasses the reducer to keep
+   * date-seeding out of `src/core` — see `main.ts`'s daily-challenge callback).
+   * `onStateChange` can't observe that transition itself, so the caller must
+   * invoke this explicitly right before such a run begins.
+   */
+  resetForNewRun(bestAtRunStart: number): void {
+    this.bestAtRunStart = bestAtRunStart;
+    this.pendingShrinkSurvivals = 0;
+  }
+
   /** Also used by Task 19 for streak/leaderboard-rank unlocks, which fire outside onStateChange. */
   applyUnlocks(ids: readonly string[]): void {
     if (ids.length === 0) return;
