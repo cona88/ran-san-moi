@@ -7,11 +7,29 @@ import { Sfx } from '../audio/sfx';
 import { attachKeyboard } from '../input/keyboard';
 import { attachSwipe, createTouchControls } from '../input/touch';
 import type { ControlHandlers } from '../input/controls';
-import { Hud } from '../ui/hud';
+import { Toolbar } from '../ui/toolbar';
 import { Overlay } from '../ui/overlay';
 import { ScorePopups } from '../ui/popups';
 import { SettingsPanel } from '../ui/settings';
-import { loadBest, loadSettings, saveBest, saveSettings, type Settings } from '../platform/storage';
+import { StatsPanel } from '../ui/statsPanel';
+import {
+  loadBest,
+  loadOrCreateNickname,
+  loadPlayerId,
+  loadSettings,
+  saveBest,
+  saveSettings,
+  type Settings,
+} from '../platform/storage';
+import { AchievementTracker } from './achievementTracker';
+import { AchievementToast } from '../ui/achievementToast';
+import { dailySeed, currentStreak, recordDailyPlay } from '../platform/daily';
+import { submitScore, type LeaderboardMode } from '../platform/leaderboard';
+import {
+  evaluateLeaderboardAchievements,
+  evaluateStreakAchievements,
+  loadUnlockedAchievements,
+} from '../platform/achievements';
 
 /** Fraction of a tick after which a fresh turn snaps forward for responsiveness. */
 const STEP_AHEAD = 0.5;
@@ -25,6 +43,7 @@ function bootstrap(): void {
 
   const settings = loadSettings();
   let activeDifficulty = settings.difficulty;
+  let isDailyRun = false;
   let state: GameState = createInitialState({
     config: configFor(settings.difficulty),
     best: loadBest(),
@@ -33,8 +52,11 @@ function bootstrap(): void {
 
   const renderer = new GameRenderer(appRoot, state.config);
   const sfx = new Sfx(settings.sound);
-  const hud = new Hud(uiRoot);
   const popups = new ScorePopups(uiRoot);
+  const achievementToast = new AchievementToast(uiRoot);
+  const achievementTracker = new AchievementTracker((defs) => {
+    for (const def of defs) achievementToast.show(def);
+  });
 
   // --- side-effecting dispatch ------------------------------------------------
   let acc = 0; // accumulated milliseconds toward the next tick
@@ -52,6 +74,7 @@ function bootstrap(): void {
       const spot = renderer.projectCell(prev.food);
       if (spot) popups.spawn(spot.x, spot.y);
     }
+    achievementTracker.onStateChange(prev, next);
     if (next.phase === 'gameover' && prev.phase !== 'gameover') {
       sfx.crash();
       saveBest(next.best);
@@ -64,14 +87,28 @@ function bootstrap(): void {
         if (prev.phase === 'ready' || prev.phase === 'gameover') acc = 0;
         overlay.hide();
       } else if (next.phase === 'paused') overlay.showPaused();
-      else if (next.phase === 'ready') overlay.showReady();
+      else if (next.phase === 'ready') overlay.showReady(currentStreak());
       else if (next.phase === 'gameover') {
         overlay.showGameOver(next.score, next.score >= next.best && next.score > 0, next.won);
+        const mode: LeaderboardMode = isDailyRun ? 'daily' : 'alltime';
+        const submissionDifficulty = isDailyRun ? 'normal' : activeDifficulty;
+        const nickname = loadOrCreateNickname();
+        void submitScore(mode, submissionDifficulty, next.score, { id: playerId, nickname }).then(
+          ({ rank }) => {
+            const unlocked = loadUnlockedAchievements();
+            achievementTracker.applyUnlocks(evaluateLeaderboardAchievements(rank, unlocked));
+          },
+        );
+        if (isDailyRun) {
+          const streak = recordDailyPlay();
+          const unlocked = loadUnlockedAchievements();
+          achievementTracker.applyUnlocks(evaluateStreakAchievements(streak.count, unlocked));
+        }
       }
     }
 
-    hud.setScore(next.score);
-    hud.setBest(next.best);
+    toolbar.setScore(next.score);
+    toolbar.setBest(next.best);
 
     // Only re-sync the renderer when the snake actually advanced (a moved array
     // is a new reference) or on game over — never on a mere queued turn, which
@@ -91,7 +128,12 @@ function bootstrap(): void {
     primary() {
       sfx.resume();
       if (state.phase === 'paused') dispatch({ type: 'resume' });
-      else if (state.phase !== 'playing') dispatch({ type: 'start' });
+      else if (state.phase !== 'playing') {
+        isDailyRun = false;
+        const config = configFor(activeDifficulty);
+        if (state.config !== config) state = { ...state, config };
+        dispatch({ type: 'start' });
+      }
     },
     togglePause() {
       if (state.phase === 'playing') dispatch({ type: 'pause' });
@@ -99,12 +141,32 @@ function bootstrap(): void {
     },
   };
 
-  const overlay = new Overlay(uiRoot, controls.primary);
+  function onDailyStart(): void {
+    achievementTracker.resetForNewRun(state.best);
+    overlay.hide();
+    renderer.sync(state);
+    toolbar.setScore(state.score);
+    toolbar.setBest(state.best);
+  }
+
+  const overlay = new Overlay(uiRoot, controls.primary, () => {
+    isDailyRun = true;
+    state = {
+      ...createInitialState({
+        seed: dailySeed(new Date()),
+        config: configFor('normal'),
+        best: state.best,
+      }),
+      phase: 'playing',
+    };
+    acc = 0;
+    onDailyStart();
+  });
   const detachKeyboard = attachKeyboard(controls);
   createTouchControls(uiRoot, controls);
   attachSwipe(appRoot, controls);
 
-  new SettingsPanel(uiRoot, settings, {
+  const settingsPanel = new SettingsPanel(uiRoot, settings, {
     onChange(next: Settings) {
       saveSettings(next);
       sfx.setEnabled(next.sound);
@@ -118,8 +180,21 @@ function bootstrap(): void {
     },
   });
 
+  const playerId = loadPlayerId();
+  const statsPanel = new StatsPanel(uiRoot, activeDifficulty, {
+    onVisibilityChange(open) {
+      if (open && state.phase === 'playing') dispatch({ type: 'pause' });
+    },
+  });
+
+  const toolbar = new Toolbar(uiRoot, {
+    onLeaderboardClick: () => statsPanel.open(playerId),
+    onSettingsClick: () => settingsPanel.open(),
+  });
+
   /** Rebuild the game when the difficulty changes; returns to the ready screen. */
   function startFreshGame(next: Settings): void {
+    isDailyRun = false;
     state = createInitialState({
       config: configFor(next.difficulty),
       best: state.best,
@@ -127,16 +202,16 @@ function bootstrap(): void {
     });
     acc = 0;
     renderer.sync(state);
-    hud.setScore(state.score);
-    hud.setBest(state.best);
-    overlay.showReady();
+    toolbar.setScore(state.score);
+    toolbar.setBest(state.best);
+    overlay.showReady(currentStreak());
   }
 
   // --- initial paint ----------------------------------------------------------
   renderer.sync(state);
-  hud.setScore(state.score);
-  hud.setBest(state.best);
-  overlay.showReady();
+  toolbar.setScore(state.score);
+  toolbar.setBest(state.best);
+  overlay.showReady(currentStreak());
 
   // --- main loop (fixed-timestep simulation, interpolated render) -------------
   let lastFrame = performance.now();

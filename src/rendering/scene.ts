@@ -39,10 +39,11 @@ export class SceneRig {
   private readonly baseDistance: number;
 
   constructor(
-    container: HTMLElement,
+    private readonly container: HTMLElement,
     private readonly fitHalfExtent: number,
   ) {
-    const { innerWidth: w, innerHeight: h } = window;
+    const w = container.clientWidth;
+    const h = container.clientHeight;
 
     this.baseDistance = this.cameraDir.length();
     this.cameraDir.normalize();
@@ -81,7 +82,8 @@ export class SceneRig {
 
   /** Match renderer, composer and camera to the current window size. */
   resize(): void {
-    const { innerWidth: w, innerHeight: h } = window;
+    const w = this.container.clientWidth;
+    const h = this.container.clientHeight;
     if (w <= 0 || h <= 0) return; // minimized / hidden tab — keep last good frame
     // Re-apply pixel ratio: it can change at runtime (monitor swap, browser zoom).
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -92,8 +94,8 @@ export class SceneRig {
 
   /** Position the camera (and scale the fog) to frame the board for the aspect. */
   private fitCamera(): void {
-    const w = window.innerWidth;
-    const h = window.innerHeight;
+    const w = this.container.clientWidth;
+    const h = this.container.clientHeight;
     if (w <= 0 || h <= 0) return; // degenerate viewport — don't poison the camera
     const distance = cameraFitDistance(w / h, this.baseDistance, this.fitHalfExtent, FOV);
     if (!Number.isFinite(distance)) return;

@@ -3,6 +3,7 @@
   --magenta: #ff2bd6;
   --purple: #9d4bff;
   --bg: #08020f;
+  --toolbar-h: 56px;
 }
 
 * {
@@ -36,26 +37,60 @@ body {
 
 #app {
   position: fixed;
-  inset: 0;
+  top: var(--toolbar-h);
+  left: 0;
+  right: 0;
+  bottom: 0;
 }
 
 canvas {
   display: block;
 }
 
-/* ---------- HUD ---------- */
-#hud {
+/* ---------- Toolbar ---------- */
+#toolbar {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
+  height: calc(var(--toolbar-h) + env(safe-area-inset-top));
+  padding-top: env(safe-area-inset-top);
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  align-items: flex-start;
-  padding: max(22px, env(safe-area-inset-top)) max(28px, env(safe-area-inset-right)) 0
-    max(28px, env(safe-area-inset-left));
-  pointer-events: none;
-  z-index: 10;
+  padding-left: max(20px, env(safe-area-inset-left));
+  padding-right: max(20px, env(safe-area-inset-right));
+  background: linear-gradient(to bottom, rgba(8, 2, 15, 0.96), rgba(8, 2, 15, 0.88));
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(25, 246, 255, 0.25);
+  box-shadow: 0 2px 20px rgba(25, 246, 255, 0.08);
+  z-index: 25;
+}
+
+.toolbar-icons {
+  display: flex;
+  gap: 10px;
+}
+
+.icon-btn {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(157, 75, 255, 0.4);
+  border-radius: 10px;
+  background: rgba(157, 75, 255, 0.1);
+  color: var(--purple);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 0 14px rgba(157, 75, 255, 0.15) inset;
+}
+
+.icon-btn:hover {
+  background: rgba(157, 75, 255, 0.22);
 }
 
 .stat {
@@ -113,6 +148,60 @@ canvas {
   to {
     opacity: 0;
     transform: translate(-50%, -100%) translateY(-46px);
+  }
+}
+
+/* ---------- Achievement toasts ---------- */
+#achievement-toasts {
+  position: fixed;
+  top: calc(var(--toolbar-h) + env(safe-area-inset-top) + 14px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+  z-index: 22;
+}
+
+.achievement-toast {
+  padding: 10px 20px;
+  border: 1px solid rgba(157, 75, 255, 0.5);
+  border-radius: 10px;
+  background: rgba(8, 2, 15, 0.92);
+  box-shadow: 0 0 20px rgba(157, 75, 255, 0.3);
+  text-align: center;
+  animation: toast-lifecycle 3.4s ease-in-out forwards;
+}
+
+.achievement-toast-title {
+  font-size: 11px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+
+.achievement-toast-name {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--purple);
+  text-shadow: 0 0 10px rgba(157, 75, 255, 0.6);
+}
+
+@keyframes toast-lifecycle {
+  0% {
+    opacity: 0;
+    transform: translateY(-14px);
+  }
+  10%,
+  85% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-14px);
   }
 }
 
@@ -196,6 +285,23 @@ canvas {
   }
 }
 
+.daily-cta {
+  margin-top: 14px;
+  font-size: 14px;
+  letter-spacing: 1px;
+  padding: 8px 16px;
+  border: 1px solid rgba(255, 226, 75, 0.4);
+  border-radius: 10px;
+  background: rgba(255, 226, 75, 0.08);
+  color: #ffe24b;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.daily-cta:hover {
+  background: rgba(255, 226, 75, 0.18);
+}
+
 #finalScore {
   margin-top: 18px;
   font-size: 20px;
@@ -216,29 +322,6 @@ canvas {
 }
 
 /* ---------- Settings ---------- */
-#settings-btn {
-  position: fixed;
-  top: max(22px, env(safe-area-inset-top));
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 25;
-  pointer-events: auto;
-  border: 1px solid rgba(157, 75, 255, 0.4);
-  border-radius: 10px;
-  background: rgba(157, 75, 255, 0.1);
-  color: var(--purple);
-  font-size: 13px;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  padding: 8px 14px;
-  cursor: pointer;
-  box-shadow: 0 0 14px rgba(157, 75, 255, 0.15) inset;
-}
-
-#settings-btn:hover {
-  background: rgba(157, 75, 255, 0.22);
-}
-
 #settings-panel {
   position: fixed;
   inset: 0;
@@ -284,6 +367,17 @@ canvas {
   opacity: 0.8;
 }
 
+.nickname-input {
+  border: 1px solid rgba(25, 246, 255, 0.4);
+  border-radius: 8px;
+  background: rgba(25, 246, 255, 0.06);
+  color: var(--cyan);
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 10px;
+  width: 140px;
+}
+
 .seg {
   display: flex;
   gap: 6px;
@@ -319,6 +413,92 @@ canvas {
   text-transform: uppercase;
   padding: 10px 22px;
   cursor: pointer;
+}
+
+/* ---------- Stats panel ---------- */
+#stats-panel {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  background: rgba(4, 1, 8, 0.92);
+  z-index: 30;
+  transition: opacity 0.25s ease;
+  padding: 20px;
+}
+
+#stats-panel.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+#stats-body {
+  width: min(360px, 90vw);
+  max-height: 46vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.stats-row {
+  display: grid;
+  grid-template-columns: 40px 1fr auto;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid rgba(25, 246, 255, 0.2);
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.stats-row.me {
+  border-color: var(--cyan);
+  box-shadow: 0 0 12px rgba(25, 246, 255, 0.25);
+}
+
+.stats-rank {
+  opacity: 0.7;
+}
+
+.stats-score {
+  color: var(--magenta);
+  font-weight: 700;
+}
+
+.stats-empty {
+  opacity: 0.7;
+  font-size: 14px;
+  text-align: center;
+  padding: 20px 0;
+}
+
+.achievement-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid rgba(157, 75, 255, 0.25);
+  border-radius: 8px;
+  opacity: 0.45;
+}
+
+.achievement-row.unlocked {
+  opacity: 1;
+  border-color: var(--purple);
+  box-shadow: 0 0 12px rgba(157, 75, 255, 0.25);
+}
+
+.achievement-name {
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.achievement-desc {
+  font-size: 12px;
+  opacity: 0.8;
 }
 
 /* ---------- Mobile controls ---------- */
@@ -374,7 +554,7 @@ canvas {
 
 /* ---------- Responsive: phones ---------- */
 @media (max-width: 640px) {
-  #hud {
+  #toolbar {
     padding-left: max(16px, env(safe-area-inset-left));
     padding-right: max(16px, env(safe-area-inset-right));
   }
@@ -398,10 +578,6 @@ canvas {
   #finalScore {
     font-size: 18px;
   }
-  #settings-btn {
-    font-size: 12px;
-    padding: 7px 12px;
-  }
   #touch {
     grid-template-columns: repeat(3, 58px);
     grid-template-rows: repeat(2, 58px);
@@ -419,8 +595,8 @@ canvas {
 
 /* ---------- Responsive: landscape phones (short viewport) ---------- */
 @media (orientation: landscape) and (max-height: 480px) {
-  #hud {
-    padding-top: max(10px, env(safe-area-inset-top));
+  :root {
+    --toolbar-h: 44px;
   }
   .value {
     font-size: 22px;
