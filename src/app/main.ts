@@ -11,7 +11,15 @@ import { Toolbar } from '../ui/toolbar';
 import { Overlay } from '../ui/overlay';
 import { ScorePopups } from '../ui/popups';
 import { SettingsPanel } from '../ui/settings';
-import { loadBest, loadSettings, saveBest, saveSettings, type Settings } from '../platform/storage';
+import { StatsPanel } from '../ui/statsPanel';
+import {
+  loadBest,
+  loadPlayerId,
+  loadSettings,
+  saveBest,
+  saveSettings,
+  type Settings,
+} from '../platform/storage';
 
 /** Fraction of a tick after which a fresh turn snaps forward for responsiveness. */
 const STEP_AHEAD = 0.5;
@@ -117,10 +125,15 @@ function bootstrap(): void {
     },
   });
 
-  const toolbar = new Toolbar(uiRoot, {
-    onLeaderboardClick: () => {
-      /* wired in Task 16 */
+  const playerId = loadPlayerId();
+  const statsPanel = new StatsPanel(uiRoot, activeDifficulty, {
+    onVisibilityChange(open) {
+      if (open && state.phase === 'playing') dispatch({ type: 'pause' });
     },
+  });
+
+  const toolbar = new Toolbar(uiRoot, {
+    onLeaderboardClick: () => statsPanel.open(playerId),
     onSettingsClick: () => settingsPanel.open(),
   });
 
