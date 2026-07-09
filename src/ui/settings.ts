@@ -1,5 +1,6 @@
 import type { Difficulty } from '../core/types';
 import type { Settings } from '../platform/storage';
+import { loadOrCreateNickname, saveNickname } from '../platform/storage';
 import { el } from './dom';
 
 export interface SettingsHandlers {
@@ -38,6 +39,16 @@ export class SettingsPanel {
       seg.appendChild(button);
     }
 
+    const nicknameInput = el('input', { className: 'nickname-input' }) as HTMLInputElement;
+    nicknameInput.type = 'text';
+    nicknameInput.maxLength = 16;
+    nicknameInput.value = loadOrCreateNickname();
+    nicknameInput.addEventListener('change', () => {
+      const trimmed = nicknameInput.value.trim() || loadOrCreateNickname();
+      nicknameInput.value = trimmed;
+      saveNickname(trimmed);
+    });
+
     const close = el('button', { className: 'close-btn', text: 'Close' });
     close.addEventListener('click', () => this.close());
 
@@ -47,6 +58,7 @@ export class SettingsPanel {
       el('h2', { text: 'Settings' }),
       el('div', { className: 'setting-row' }, el('label', { text: 'Sound' }), this.soundToggle),
       el('div', { className: 'setting-row' }, el('label', { text: 'Difficulty' }), seg),
+      el('div', { className: 'setting-row' }, el('label', { text: 'Nickname' }), nicknameInput),
       close,
     );
 

@@ -16,8 +16,13 @@ export class Overlay {
   private readonly instructionsEl: HTMLElement;
   private readonly finalScoreEl: HTMLElement;
   private readonly ctaEl: HTMLElement;
+  private readonly dailyCtaEl: HTMLElement;
 
-  constructor(parent: HTMLElement, onPrimary: () => void) {
+  constructor(
+    parent: HTMLElement,
+    onPrimary: () => void,
+    private readonly onDailyChallenge: () => void,
+  ) {
     this.titleEl = el('div', { className: 'title', text: 'NEON SNAKE' });
     this.subtitleEl = el('div', { className: 'subtitle', text: '3D' });
     this.instructionsEl = el('div', {
@@ -28,6 +33,11 @@ export class Overlay {
     this.finalScoreEl = el('div', { id: 'finalScore' });
     this.finalScoreEl.style.display = 'none';
     this.ctaEl = el('div', { id: 'cta', className: 'cta', text: 'Press SPACE to start' });
+    this.dailyCtaEl = el('div', { id: 'daily-cta', className: 'daily-cta' });
+    this.dailyCtaEl.addEventListener('click', (event) => {
+      event.stopPropagation(); // don't also trigger onPrimary via the root's click listener
+      this.onDailyChallenge();
+    });
 
     this.root = el(
       'div',
@@ -37,21 +47,26 @@ export class Overlay {
       this.instructionsEl,
       this.finalScoreEl,
       this.ctaEl,
+      this.dailyCtaEl,
     );
     this.root.addEventListener('click', onPrimary);
     parent.appendChild(this.root);
   }
 
-  showReady(): void {
+  showReady(streak: number): void {
     this.setScreen({ title: 'NEON SNAKE', subtitle: true, instructions: true });
     this.finalScoreEl.style.display = 'none';
     this.ctaEl.textContent = 'Press SPACE to start';
+    this.dailyCtaEl.textContent =
+      streak > 0 ? `🔥 Today's Challenge (${String(streak)}-day streak)` : "🔥 Today's Challenge";
+    this.dailyCtaEl.style.display = '';
     this.reveal();
   }
 
   showPaused(): void {
     this.setScreen({ title: 'PAUSED', subtitle: false, instructions: false });
     this.finalScoreEl.style.display = 'none';
+    this.dailyCtaEl.style.display = 'none';
     this.ctaEl.textContent = 'Press P to resume';
     this.reveal();
   }
@@ -70,6 +85,7 @@ export class Overlay {
         : '';
     this.finalScoreEl.innerHTML = `You scored <b>${String(score)}</b> point${plural}${banner}`;
     this.finalScoreEl.style.display = 'block';
+    this.dailyCtaEl.style.display = 'none';
     this.ctaEl.textContent = 'Press SPACE to play again';
     this.reveal();
   }

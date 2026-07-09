@@ -285,6 +285,23 @@ canvas {
   }
 }
 
+.daily-cta {
+  margin-top: 14px;
+  font-size: 14px;
+  letter-spacing: 1px;
+  padding: 8px 16px;
+  border: 1px solid rgba(255, 226, 75, 0.4);
+  border-radius: 10px;
+  background: rgba(255, 226, 75, 0.08);
+  color: #ffe24b;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.daily-cta:hover {
+  background: rgba(255, 226, 75, 0.18);
+}
+
 #finalScore {
   margin-top: 18px;
   font-size: 20px;
@@ -348,6 +365,17 @@ canvas {
   font-size: 12px;
   letter-spacing: 2px;
   opacity: 0.8;
+}
+
+.nickname-input {
+  border: 1px solid rgba(25, 246, 255, 0.4);
+  border-radius: 8px;
+  background: rgba(25, 246, 255, 0.06);
+  color: var(--cyan);
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 10px;
+  width: 140px;
 }
 
 .seg {
