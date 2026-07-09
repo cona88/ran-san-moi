@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateRunAchievements, type RunEvent } from '../../src/platform/achievements';
+import {
+  evaluateRunAchievements,
+  evaluateStreakAchievements,
+  evaluateLeaderboardAchievements,
+  type RunEvent,
+} from '../../src/platform/achievements';
 
 const base: RunEvent = {
   nextScore: 0,
@@ -73,5 +78,36 @@ describe('evaluateRunAchievements', () => {
     expect(unlocked).toEqual(
       expect.arrayContaining(['first-bite', 'halfway-there', 'speed-demon', 'night-crawler']),
     );
+  });
+});
+
+describe('evaluateStreakAchievements', () => {
+  it('unlocks three-day-streak at 3, not before', () => {
+    expect(evaluateStreakAchievements(3, none)).toContain('three-day-streak');
+    expect(evaluateStreakAchievements(2, none)).not.toContain('three-day-streak');
+  });
+
+  it('unlocks week-streak at 7 and neon-regular at 30', () => {
+    expect(evaluateStreakAchievements(7, none)).toContain('week-streak');
+    expect(evaluateStreakAchievements(30, none)).toContain('neon-regular');
+  });
+
+  it('a big streak unlocks every threshold crossed at once', () => {
+    const unlocked = evaluateStreakAchievements(30, none);
+    expect(unlocked).toEqual(
+      expect.arrayContaining(['three-day-streak', 'week-streak', 'neon-regular']),
+    );
+  });
+});
+
+describe('evaluateLeaderboardAchievements', () => {
+  it('unlocks top-three for rank 1-3', () => {
+    expect(evaluateLeaderboardAchievements(1, none)).toContain('top-three');
+    expect(evaluateLeaderboardAchievements(3, none)).toContain('top-three');
+  });
+
+  it('does not unlock for rank 4 or worse, or a null rank', () => {
+    expect(evaluateLeaderboardAchievements(4, none)).not.toContain('top-three');
+    expect(evaluateLeaderboardAchievements(null, none)).not.toContain('top-three');
   });
 });

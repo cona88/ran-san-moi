@@ -50,3 +50,27 @@ export function evaluateRunAchievements(event: RunEvent, unlocked: ReadonlySet<s
 
   return newly;
 }
+
+/** Pure: given the current daily streak length, return newly-crossed streak ids. */
+export function evaluateStreakAchievements(
+  streakCount: number,
+  unlocked: ReadonlySet<string>,
+): string[] {
+  const newly: string[] = [];
+  const maybeUnlock = (id: string, threshold: number): void => {
+    if (streakCount >= threshold && !unlocked.has(id)) newly.push(id);
+  };
+  maybeUnlock('three-day-streak', 3);
+  maybeUnlock('week-streak', 7);
+  maybeUnlock('neon-regular', 30);
+  return newly;
+}
+
+/** Pure: given a leaderboard rank (1-based, null if unranked), return newly-unlocked ids. */
+export function evaluateLeaderboardAchievements(
+  rank: number | null,
+  unlocked: ReadonlySet<string>,
+): string[] {
+  if (rank !== null && rank <= 3 && !unlocked.has('top-three')) return ['top-three'];
+  return [];
+}
