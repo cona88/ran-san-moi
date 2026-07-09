@@ -7,7 +7,7 @@ import { Sfx } from '../audio/sfx';
 import { attachKeyboard } from '../input/keyboard';
 import { attachSwipe, createTouchControls } from '../input/touch';
 import type { ControlHandlers } from '../input/controls';
-import { Hud } from '../ui/hud';
+import { Toolbar } from '../ui/toolbar';
 import { Overlay } from '../ui/overlay';
 import { ScorePopups } from '../ui/popups';
 import { SettingsPanel } from '../ui/settings';
@@ -33,7 +33,6 @@ function bootstrap(): void {
 
   const renderer = new GameRenderer(appRoot, state.config);
   const sfx = new Sfx(settings.sound);
-  const hud = new Hud(uiRoot);
   const popups = new ScorePopups(uiRoot);
 
   // --- side-effecting dispatch ------------------------------------------------
@@ -70,8 +69,8 @@ function bootstrap(): void {
       }
     }
 
-    hud.setScore(next.score);
-    hud.setBest(next.best);
+    toolbar.setScore(next.score);
+    toolbar.setBest(next.best);
 
     // Only re-sync the renderer when the snake actually advanced (a moved array
     // is a new reference) or on game over — never on a mere queued turn, which
@@ -104,7 +103,7 @@ function bootstrap(): void {
   createTouchControls(uiRoot, controls);
   attachSwipe(appRoot, controls);
 
-  new SettingsPanel(uiRoot, settings, {
+  const settingsPanel = new SettingsPanel(uiRoot, settings, {
     onChange(next: Settings) {
       saveSettings(next);
       sfx.setEnabled(next.sound);
@@ -118,6 +117,13 @@ function bootstrap(): void {
     },
   });
 
+  const toolbar = new Toolbar(uiRoot, {
+    onLeaderboardClick: () => {
+      /* wired in Task 16 */
+    },
+    onSettingsClick: () => settingsPanel.open(),
+  });
+
   /** Rebuild the game when the difficulty changes; returns to the ready screen. */
   function startFreshGame(next: Settings): void {
     state = createInitialState({
@@ -127,15 +133,15 @@ function bootstrap(): void {
     });
     acc = 0;
     renderer.sync(state);
-    hud.setScore(state.score);
-    hud.setBest(state.best);
+    toolbar.setScore(state.score);
+    toolbar.setBest(state.best);
     overlay.showReady();
   }
 
   // --- initial paint ----------------------------------------------------------
   renderer.sync(state);
-  hud.setScore(state.score);
-  hud.setBest(state.best);
+  toolbar.setScore(state.score);
+  toolbar.setBest(state.best);
   overlay.showReady();
 
   // --- main loop (fixed-timestep simulation, interpolated render) -------------

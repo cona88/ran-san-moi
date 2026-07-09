@@ -25,9 +25,6 @@ export class SettingsPanel {
   ) {
     this.settings = initial;
 
-    const gear = el('button', { id: 'settings-btn', text: '⚙ Settings' });
-    gear.addEventListener('click', () => this.open());
-
     this.soundToggle = el('button', { className: 'toggle' }) as HTMLButtonElement;
     this.soundToggle.addEventListener('click', () => {
       this.update({ sound: !this.settings.sound });
@@ -53,7 +50,7 @@ export class SettingsPanel {
       close,
     );
 
-    parent.append(gear, this.panel);
+    parent.appendChild(this.panel);
     this.render();
   }
 
