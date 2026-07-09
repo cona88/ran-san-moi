@@ -22,7 +22,11 @@ function todayKey(): string {
 }
 
 export default async function handler(request: Request): Promise<Response> {
-  const url = new URL(request.url);
+  // Vercel's Node.js runtime hands `request.url` as a path (e.g.
+  // "/api/leaderboard?mode=..."), not an absolute URL — `new URL()` needs a
+  // base to parse that. We only ever read `.searchParams` below, so the base
+  // itself is never observed and can be any placeholder.
+  const url = new URL(request.url, 'http://localhost');
   const mode = url.searchParams.get('mode');
   const difficulty = url.searchParams.get('difficulty') ?? 'normal';
 
