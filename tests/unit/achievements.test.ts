@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 import {
   evaluateRunAchievements,
@@ -109,5 +110,35 @@ describe('evaluateLeaderboardAchievements', () => {
   it('does not unlock for rank 4 or worse, or a null rank', () => {
     expect(evaluateLeaderboardAchievements(4, none)).not.toContain('top-three');
     expect(evaluateLeaderboardAchievements(null, none)).not.toContain('top-three');
+  });
+});
+
+import { afterEach } from 'vitest';
+import { loadUnlockedAchievements, unlockAchievements } from '../../src/platform/achievements';
+
+afterEach(() => localStorage.clear());
+
+describe('unlocked-achievements persistence', () => {
+  it('starts empty', () => {
+    expect(loadUnlockedAchievements().size).toBe(0);
+  });
+
+  it('round-trips unlocked ids', () => {
+    unlockAchievements(['first-bite', 'halfway-there']);
+    const loaded = loadUnlockedAchievements();
+    expect(loaded.has('first-bite')).toBe(true);
+    expect(loaded.has('halfway-there')).toBe(true);
+    expect(loaded.size).toBe(2);
+  });
+
+  it('merges across multiple calls without duplicates', () => {
+    unlockAchievements(['first-bite']);
+    unlockAchievements(['first-bite', 'speed-demon']);
+    expect(loadUnlockedAchievements().size).toBe(2);
+  });
+
+  it('falls back to empty on corrupt JSON', () => {
+    localStorage.setItem('neonSnakeAchievements', '{ not json');
+    expect(loadUnlockedAchievements().size).toBe(0);
   });
 });

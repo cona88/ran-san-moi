@@ -74,3 +74,41 @@ export function evaluateLeaderboardAchievements(
   if (rank !== null && rank <= 3 && !unlocked.has('top-three')) return ['top-three'];
   return [];
 }
+
+const UNLOCKED_KEY = 'neonSnakeAchievements';
+
+function safeGet(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function safeSet(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* storage unavailable — best-effort only */
+  }
+}
+
+export function loadUnlockedAchievements(): Set<string> {
+  const raw = safeGet(UNLOCKED_KEY);
+  if (!raw) return new Set();
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? new Set(parsed.filter((id) => typeof id === 'string'))
+      : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+export function unlockAchievements(ids: readonly string[]): void {
+  if (ids.length === 0) return;
+  const merged = loadUnlockedAchievements();
+  for (const id of ids) merged.add(id);
+  safeSet(UNLOCKED_KEY, JSON.stringify([...merged]));
+}
