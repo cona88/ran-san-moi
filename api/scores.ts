@@ -43,7 +43,10 @@ function todayKey(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-export default async function handler(request: Request): Promise<Response> {
+// A named `POST` export, not `export default` — see the comment in
+// api/leaderboard.ts for why (a default export silently swallows the
+// Response we return under this runtime's routing).
+export async function POST(request: Request): Promise<Response> {
   if (request.method !== 'POST') {
     return Response.json({ error: 'method not allowed' }, { status: 405 });
   }

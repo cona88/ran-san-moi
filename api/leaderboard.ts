@@ -21,7 +21,13 @@ function todayKey(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-export default async function handler(request: Request): Promise<Response> {
+// A named `GET` export, not `export default`, is what Vercel's Node.js
+// runtime routes to the Web-standard Request/Response signature here — a
+// default export gets treated as the legacy `(req, res) => void` handler,
+// which silently ignores any `Response` we return (confirmed via a
+// production 504: the runtime logged "default export returned a `Response`
+// ... returns are ignored" and the request hung until timeout).
+export async function GET(request: Request): Promise<Response> {
   // Vercel's Node.js runtime hands `request.url` as a path (e.g.
   // "/api/leaderboard?mode=..."), not an absolute URL — `new URL()` needs a
   // base to parse that. We only ever read `.searchParams` below, so the base
