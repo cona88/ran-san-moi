@@ -1,12 +1,14 @@
 import { Redis } from '@upstash/redis';
-// Import the specific files, not the `src/core` barrel: Vercel's Node.js
-// function build doesn't bundle `api/*.ts` the way `vite build` bundles the
-// client (which resolves a directory import to its index.ts) — the compiled
-// output keeps a literal `from '.../src/core'` directory import, which
-// Node's native ESM loader rejects (ERR_UNSUPPORTED_DIR_IMPORT), confirmed
-// via a production 500. Direct file imports sidestep that resolution step.
-import { configFor } from '../src/core/config';
-import type { Difficulty } from '../src/core/types';
+// `api/*.ts` isn't bundled the way `vite build` bundles the client — Vercel's
+// Node.js Functions build transpiles each file individually and leaves
+// relative imports for native Node ESM to resolve at runtime (this project
+// is `"type": "module"`). That resolver requires the exact file, extension
+// included: neither a directory import (`'../src/core'`, ERR_UNSUPPORTED_DIR_IMPORT)
+// nor an extensionless file path (`'../src/core/config'`, ERR_MODULE_NOT_FOUND)
+// works — only the fully-qualified `.js` specifier does, confirmed by hitting
+// both errors in production before landing on this.
+import { configFor } from '../src/core/config.js';
+import type { Difficulty } from '../src/core/types.js';
 
 const NICKNAME_MAX = 16;
 const DIFFICULTIES: readonly Difficulty[] = ['easy', 'normal', 'hard'];
