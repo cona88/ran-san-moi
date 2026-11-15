@@ -2,9 +2,7 @@ import type { GamePhase } from './types';
 
 /**
  * Allowed phase transitions, including `reset`, which is an explicit escape
- * hatch back to `ready` from any active phase. `reduce` only ever produces
- * transitions listed here; the state-machine test drives every action through
- * `reduce` and asserts each resulting phase change is permitted.
+ * hatch back to `ready` from any active phase.
  */
 const TRANSITIONS: Record<GamePhase, readonly GamePhase[]> = {
   ready: ['playing'],
@@ -14,6 +12,9 @@ const TRANSITIONS: Record<GamePhase, readonly GamePhase[]> = {
 };
 
 /** Whether moving from one phase to another is legal. */
-export function canTransition(from: GamePhase, to: GamePhase): boolean {
+export function isValidTransition(from: GamePhase, to: GamePhase): boolean {
   return TRANSITIONS[from].includes(to);
 }
+
+/** Alias for {@link isValidTransition}. */
+export const canTransition = isValidTransition;

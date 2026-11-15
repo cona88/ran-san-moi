@@ -1,41 +1,48 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_CONFIG } from '../../src/core/config';
-import { allInsideWalls, hitsBody, hitsWall } from '../../src/core/systems/collision';
+import {
+  allInsideWalls,
+  distancePointToSegment,
+  hitsBody,
+  hitsWall,
+  minDistanceToChain,
+} from '../../src/core/systems/collision';
 
 describe('collision', () => {
-  const config = DEFAULT_CONFIG;
+  const config = DEFAULT_CONFIG; // [-56, 56] at margin 0
 
-  it('flags cells outside the walls', () => {
-    // margin 2 -> bounds [2, 22]
-    expect(hitsWall({ x: 1, z: 10 }, config, 2)).toBe(true);
-    expect(hitsWall({ x: 23, z: 10 }, config, 2)).toBe(true);
-    expect(hitsWall({ x: 10, z: 1 }, config, 2)).toBe(true);
-    expect(hitsWall({ x: 10, z: 23 }, config, 2)).toBe(true);
+  it('flags coordinates outside the world bounds', () => {
+    expect(hitsWall({ x: -57, z: 0 }, config, 0)).toBe(true);
+    expect(hitsWall({ x: 57, z: 0 }, config, 0)).toBe(true);
+    expect(hitsWall({ x: 0, z: -57 }, config, 0)).toBe(true);
+    expect(hitsWall({ x: 0, z: 57 }, config, 0)).toBe(true);
   });
 
-  it('allows cells on and inside the walls', () => {
-    expect(hitsWall({ x: 2, z: 2 }, config, 2)).toBe(false);
-    expect(hitsWall({ x: 22, z: 22 }, config, 2)).toBe(false);
-    expect(hitsWall({ x: 12, z: 12 }, config, 2)).toBe(false);
+  it('allows points on and inside the bounds', () => {
+    expect(hitsWall({ x: -56, z: -56 }, config, 0)).toBe(false);
+    expect(hitsWall({ x: 56, z: 56 }, config, 0)).toBe(false);
+    expect(hitsWall({ x: 0, z: 0 }, config, 0)).toBe(false);
   });
 
-  it('checks whole bodies against the walls', () => {
+  it('checks whole chains against world bounds', () => {
     const inside = [
       { x: 5, z: 5 },
-      { x: 4, z: 5 },
+      { x: -12.5, z: 8.2 },
     ];
-    expect(allInsideWalls(inside, config, 2)).toBe(true);
-    expect(allInsideWalls([...inside, { x: 1, z: 5 }], config, 2)).toBe(false);
-    expect(allInsideWalls([], config, 2)).toBe(true);
+    expect(allInsideWalls(inside, config, 0)).toBe(true);
+    expect(allInsideWalls([...inside, { x: 60, z: 5 }], config, 0)).toBe(false);
+    expect(allInsideWalls([], config, 0)).toBe(true);
   });
 
-  it('detects body overlap', () => {
+  it('detects continuous body proximity and segment distances', () => {
     const body = [
       { x: 5, z: 5 },
       { x: 5, z: 6 },
     ];
-    expect(hitsBody({ x: 5, z: 6 }, body)).toBe(true);
+    expect(hitsBody({ x: 5.1, z: 6.1 }, body)).toBe(true);
     expect(hitsBody({ x: 6, z: 6 }, body)).toBe(false);
     expect(hitsBody({ x: 0, z: 0 }, [])).toBe(false);
+    expect(minDistanceToChain({ x: 5, z: 8 }, body)).toBe(2);
+    expect(distancePointToSegment({ x: 5, z: 1 }, { x: 0, z: 0 }, { x: 10, z: 0 })).toBe(1);
   });
 });

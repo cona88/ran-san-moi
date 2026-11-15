@@ -2,77 +2,250 @@ import {
   AmbientLight,
   Color,
   DirectionalLight,
+  DynamicDrawUsage,
   Fog,
+  InstancedMesh,
+  Matrix4,
+  MeshBasicMaterial,
+  NeutralToneMapping,
+  OctahedronGeometry,
   PerspectiveCamera,
   PointLight,
   Scene,
+  SRGBColorSpace,
   Vector2,
   Vector3,
   WebGLRenderer,
 } from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { COLORS } from './palette';
-import { cameraFitDistance, cameraTargetZ } from './cameraFit';
+import type { VisualTheme } from '../core/types';
+import { cameraFitDistance } from './cameraFit';
+import { THEMES } from './palette';
 
 const FOV = 50;
-const FOG_NEAR = 18;
-const FOG_FAR = 42;
+const FOG_NEAR = 34;
+const FOG_FAR = 86;
+const MAX_LOOK_OFFSET = 4.2;
+const AMBIENT_PARTICLE_COUNT = 84;
+const SNAP_DISTANCE_SQ = 12 * 12;
+
+interface AmbientMote {
+  readonly baseAngle: number;
+  readonly radius: number;
+  readonly baseY: number;
+  readonly speed: number;
+  readonly bobSpeed: number;
+  readonly phase: number;
+  readonly scale: number;
+  readonly spinSpeed: number;
+}
+
+function clamp(v: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, v));
+}
 
 /**
- * The renderer rig: WebGL renderer, scene graph, adaptive isometric camera,
- * lights and the synthwave bloom post-processing pipeline. Owns the canvas
- * and all resize bookkeeping.
- *
- * The camera keeps a fixed viewing direction but adapts its distance to the
- * viewport aspect ratio so the whole board stays visible on any screen
- * (portrait phones dolly back); the fog and far plane scale with it.
+ * The renderer rig: WebGL renderer, scene graph, player-following adaptive
+ * isometric camera with level-based zoom & smooth DualSense Right-Stick tilt,
+ * theme-aware lighting & anti-glare bloom + OutputPass pipeline.
  */
 export class SceneRig {
   readonly scene = new Scene();
   readonly camera: PerspectiveCamera;
+
   private readonly renderer: WebGLRenderer;
   private readonly composer: EffectComposer;
+  private readonly bloomPass: UnrealBloomPass;
+  private readonly outputPass: OutputPass;
   private readonly fog: Fog;
-  private readonly cameraDir = new Vector3(0, 16, 15);
+
+  private readonly ambientLight: AmbientLight;
+  private readonly dirLight: DirectionalLight;
+  private readonly fillLight: PointLight;
+  private readonly accentLight: PointLight;
+
+  private readonly ambientGeometry = new OctahedronGeometry(0.13, 0);
+  private readonly ambientMaterial = new MeshBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0.72,
+  });
+  private readonly ambientMesh: InstancedMesh;
+  private readonly motes: AmbientMote[] = [];
+  private readonly scratchMatrix = new Matrix4();
+  private readonly scratchPos = new Vector3();
+  private readonly scratchScale = new Vector3();
+  private readonly scratchColor = new Color();
+
+  private readonly cameraDir = new Vector3(0, 17, 10.5);
   private readonly baseDistance: number;
+  private fittedDistance = 20;
+
+  private currentFollowX = 0;
+  private currentFollowZ = 0;
+  private hasSnappedFollow = false;
+
+  private targetZoom = 1;
+  private currentZoom = 1;
+
+  private targetLookX = 0;
+  private targetLookZ = 0;
+  private currentLookX = 0;
+  private currentLookZ = 0;
+
+  private currentTheme: VisualTheme = 'honeycomb_arena';
 
   constructor(
     private readonly container: HTMLElement,
-    private readonly fitHalfExtent: number,
+    private readonly viewHalfExtent = 11.5,
   ) {
-    const w = container.clientWidth;
-    const h = container.clientHeight;
+    const w = Math.max(1, container.clientWidth || window.innerWidth || 800);
+    const h = Math.max(1, container.clientHeight || window.innerHeight || 600);
 
     this.baseDistance = this.cameraDir.length();
     this.cameraDir.normalize();
 
-    this.renderer = new WebGLRenderer({ antialias: true, alpha: false });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer = new WebGLRenderer({
+      antialias: true,
+      alpha: false,
+      powerPreference: 'high-performance',
+    });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.setSize(w, h);
+    this.renderer.outputColorSpace = SRGBColorSpace;
+    this.renderer.toneMapping = NeutralToneMapping;
+    this.renderer.toneMappingExposure = 1.0;
     container.appendChild(this.renderer.domElement);
 
-    this.scene.background = new Color(COLORS.background);
-    this.fog = new Fog(COLORS.background, FOG_NEAR, FOG_FAR);
+    const palette = THEMES[this.currentTheme];
+    this.scene.background = new Color(palette.background);
+    this.fog = new Fog(palette.fogColor, FOG_NEAR, FOG_FAR);
     this.scene.fog = this.fog;
 
-    // Generous far plane so dollying back on tall screens never clips the board.
-    this.camera = new PerspectiveCamera(FOV, w / h, 0.1, 200);
+    this.camera = new PerspectiveCamera(FOV, w / h, 0.1, 260);
 
-    this.scene.add(new AmbientLight(0x4422aa, 0.6));
-    const dir = new DirectionalLight(0xffffff, 0.5);
-    dir.position.set(6, 14, 8);
-    this.scene.add(dir);
-    const fill = new PointLight(COLORS.magenta, 0.6, 40);
-    fill.position.set(-8, 6, -8);
-    this.scene.add(fill);
+    this.ambientLight = new AmbientLight(palette.ambientColor, palette.ambientIntensity);
+    this.scene.add(this.ambientLight);
+
+    this.dirLight = new DirectionalLight(palette.dirColor, palette.dirIntensity);
+    this.dirLight.position.set(14, 26, 16);
+    this.scene.add(this.dirLight);
+
+    this.fillLight = new PointLight(palette.fillColor, palette.fillIntensity, 56);
+    this.fillLight.position.set(-10, 8, -9);
+    this.scene.add(this.fillLight);
+
+    this.accentLight = new PointLight(palette.accentColor, palette.accentIntensity, 56);
+    this.accentLight.position.set(10, 7, 10);
+    this.scene.add(this.accentLight);
+
+    this.ambientMesh = new InstancedMesh(
+      this.ambientGeometry,
+      this.ambientMaterial,
+      AMBIENT_PARTICLE_COUNT,
+    );
+    this.ambientMesh.instanceMatrix.setUsage(DynamicDrawUsage);
+    this.ambientMesh.frustumCulled = false;
+    this.initAmbientMotes();
+    this.scene.add(this.ambientMesh);
 
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
-    this.composer.addPass(new UnrealBloomPass(new Vector2(w, h), 0.55, 0.5, 0.25));
+    this.bloomPass = new UnrealBloomPass(new Vector2(w, h), 0.18, 0.35, 0.88);
+    this.composer.addPass(this.bloomPass);
+    this.outputPass = new OutputPass();
+    this.composer.addPass(this.outputPass);
 
+    this.setTheme(this.currentTheme);
     this.fitCamera();
+  }
+
+  /** Apply a visual theme to background, fog, lights, bloom thresholds and ambient motes. */
+  setTheme(theme: VisualTheme): void {
+    this.currentTheme = theme;
+    const palette = THEMES[theme];
+    (this.scene.background as Color).setHex(palette.background);
+    this.fog.color.setHex(palette.fogColor);
+
+    this.ambientLight.color.setHex(palette.ambientColor);
+    this.ambientLight.intensity = palette.ambientIntensity;
+    this.dirLight.color.setHex(palette.dirColor);
+    this.dirLight.intensity = palette.dirIntensity;
+    this.fillLight.color.setHex(palette.fillColor);
+    this.fillLight.intensity = palette.fillIntensity;
+    this.accentLight.color.setHex(palette.accentColor);
+    this.accentLight.intensity = palette.accentIntensity;
+
+    // Anti-glare bloom tuning so warm honeycomb & pastel candy arenas stay crisp.
+    if (theme === 'honeycomb_arena' || theme === 'candy_island') {
+      this.bloomPass.threshold = 0.88;
+      this.bloomPass.strength = 0.18;
+      this.bloomPass.radius = 0.35;
+      this.ambientMaterial.opacity = theme === 'honeycomb_arena' ? 0.45 : 0.72;
+    } else {
+      this.bloomPass.threshold = 0.36;
+      this.bloomPass.strength = 0.45;
+      this.bloomPass.radius = 0.42;
+      this.ambientMaterial.opacity = 0.82;
+    }
+
+    const paletteColors = palette.ambientColors;
+    for (let i = 0; i < AMBIENT_PARTICLE_COUNT; i++) {
+      const hex = paletteColors[i % paletteColors.length] ?? 0xffffff;
+      this.scratchColor.setHex(hex);
+      this.ambientMesh.setColorAt(i, this.scratchColor);
+    }
+    if (this.ambientMesh.instanceColor) {
+      this.ambientMesh.instanceColor.needsUpdate = true;
+    }
+  }
+
+  /** Set normalized camera look offset (-1..1) from DualSense Right Stick. */
+  setCameraLook(nx: number, ny: number): void {
+    const safeX = Number.isFinite(nx) ? clamp(nx, -1, 1) : 0;
+    const safeY = Number.isFinite(ny) ? clamp(ny, -1, 1) : 0;
+    this.targetLookX = safeX * MAX_LOOK_OFFSET;
+    this.targetLookZ = safeY * MAX_LOOK_OFFSET;
+  }
+
+  /** Snap the camera immediately to a world position (e.g. initial spawn, wrap, reset). */
+  snapFollowTarget(x: number, z: number, playerLevel = 5): void {
+    this.currentFollowX = x;
+    this.currentFollowZ = z;
+    this.hasSnappedFollow = true;
+    this.targetZoom = this.computeZoomScale(playerLevel);
+    this.currentZoom = this.targetZoom;
+    this.applyCameraTransform();
+  }
+
+  /** Update smooth player-following camera, level zoom, look tilt & ambient motes. */
+  update(elapsed: number, delta: number, followX = 0, followZ = 0, playerLevel = 5): void {
+    const dt = Math.min(Math.max(delta, 0), 0.1);
+    const lookSmooth = 1 - Math.exp(-9 * dt);
+    this.currentLookX += (this.targetLookX - this.currentLookX) * lookSmooth;
+    this.currentLookZ += (this.targetLookZ - this.currentLookZ) * lookSmooth;
+
+    const dx = followX - this.currentFollowX;
+    const dz = followZ - this.currentFollowZ;
+    if (!this.hasSnappedFollow || dx * dx + dz * dz > SNAP_DISTANCE_SQ) {
+      this.currentFollowX = followX;
+      this.currentFollowZ = followZ;
+      this.hasSnappedFollow = true;
+    } else {
+      const followSmooth = 1 - Math.exp(-14 * dt);
+      this.currentFollowX += dx * followSmooth;
+      this.currentFollowZ += dz * followSmooth;
+    }
+
+    this.targetZoom = this.computeZoomScale(playerLevel);
+    const zoomSmooth = 1 - Math.exp(-5 * dt);
+    this.currentZoom += (this.targetZoom - this.currentZoom) * zoomSmooth;
+
+    this.applyCameraTransform();
+    this.updateAmbientMotes(elapsed);
   }
 
   /** Render one frame through the bloom composer. */
@@ -80,43 +253,144 @@ export class SceneRig {
     this.composer.render();
   }
 
+  /** Effective viewport dimensions for 2D UI projection. */
+  getViewportSize(): { width: number; height: number } {
+    const width = this.container.clientWidth || window.innerWidth;
+    const height = this.container.clientHeight || window.innerHeight;
+    return { width, height };
+  }
+
+  /** Current world-space focus point `(followX, followZ)`. */
+  getFollowTarget(target = new Vector3()): Vector3 {
+    return target.set(this.currentFollowX, 0, this.currentFollowZ);
+  }
+
+  /** Current smooth zoom scale (`1.0 .. 1.55`). */
+  getZoomScale(): number {
+    return this.currentZoom;
+  }
+
   /** Match renderer, composer and camera to the current window size. */
   resize(): void {
     const w = this.container.clientWidth;
     const h = this.container.clientHeight;
-    if (w <= 0 || h <= 0) return; // minimized / hidden tab — keep last good frame
-    // Re-apply pixel ratio: it can change at runtime (monitor swap, browser zoom).
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    if (w <= 0 || h <= 0) return;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.setSize(w, h);
     this.composer.setSize(w, h);
+    this.bloomPass.resolution.set(w, h);
     this.fitCamera();
   }
 
-  /** Position the camera (and scale the fog) to frame the board for the aspect. */
-  private fitCamera(): void {
-    const w = this.container.clientWidth;
-    const h = this.container.clientHeight;
-    if (w <= 0 || h <= 0) return; // degenerate viewport — don't poison the camera
-    const distance = cameraFitDistance(w / h, this.baseDistance, this.fitHalfExtent, FOV);
-    if (!Number.isFinite(distance)) return;
-
-    const aspect = w / h;
-    this.camera.position.copy(this.cameraDir).multiplyScalar(distance);
-    // Aim past the origin so the near and far board edges are vertically
-    // balanced in the frame — looking dead at the centre crops the bottom row.
-    const targetZ = cameraTargetZ(distance, this.fitHalfExtent, this.cameraDir.y, this.cameraDir.z);
-    this.camera.lookAt(0, 0, targetZ);
-    this.camera.aspect = aspect;
-    this.camera.updateProjectionMatrix();
-
-    const scale = distance / this.baseDistance;
-    this.fog.near = FOG_NEAR * scale;
-    this.fog.far = FOG_FAR * scale;
-  }
-
   dispose(): void {
+    this.scene.remove(this.ambientMesh);
+    this.ambientGeometry.dispose();
+    this.ambientMaterial.dispose();
     this.composer.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
+  }
+
+  private computeZoomScale(level: number): number {
+    return clamp(1 + Math.sqrt(Math.max(0, level - 5)) * 0.045, 1, 1.55);
+  }
+
+  private initAmbientMotes(): void {
+    for (let i = 0; i < AMBIENT_PARTICLE_COUNT; i++) {
+      const frac = (i + 0.5) / AMBIENT_PARTICLE_COUNT;
+      const baseAngle = i * 2.3999632;
+      const radius = 8 + frac * 18;
+      const baseY = -0.2 + ((i * 7) % 11) * 0.55;
+      this.motes.push({
+        baseAngle,
+        radius,
+        baseY,
+        speed: 0.05 + (i % 5) * 0.018,
+        bobSpeed: 0.9 + (i % 4) * 0.35,
+        phase: i * 0.73,
+        scale: 0.55 + (i % 5) * 0.16,
+        spinSpeed: 0.7 + (i % 3) * 0.5,
+      });
+      this.scratchColor.setHex(0xffffff);
+      this.ambientMesh.setColorAt(i, this.scratchColor);
+    }
+    if (this.ambientMesh.instanceColor) {
+      this.ambientMesh.instanceColor.needsUpdate = true;
+    }
+  }
+
+  private updateAmbientMotes(elapsed: number): void {
+    const style = THEMES[this.currentTheme].particleStyle;
+    this.ambientMesh.position.set(this.currentFollowX, 0, this.currentFollowZ);
+
+    for (let i = 0; i < AMBIENT_PARTICLE_COUNT; i++) {
+      const m = this.motes[i];
+      if (!m) continue;
+
+      let angle = m.baseAngle + elapsed * m.speed;
+      let y = m.baseY + Math.sin(elapsed * m.bobSpeed + m.phase) * 0.85;
+      let r = m.radius * this.currentZoom;
+      let s = m.scale;
+
+      if (style === 'stars') {
+        angle = m.baseAngle + elapsed * 0.012;
+        y = 1.2 + ((i * 11) % 14) * 0.55;
+        r = (11 + (i % 12) * 1.4) * this.currentZoom;
+        s = m.scale * (0.55 + 0.55 * (0.5 + 0.5 * Math.sin(elapsed * 2.6 + m.phase)));
+      } else if (style === 'bubbles') {
+        const rise = ((elapsed * 0.55 + m.phase) % 7) - 0.3;
+        y = rise;
+        r = m.radius * this.currentZoom + Math.sin(elapsed * 0.8 + m.phase) * 0.6;
+        s = m.scale * (0.85 + 0.2 * Math.sin(elapsed * 2 + m.phase));
+      } else if (style === 'pollen') {
+        angle = m.baseAngle + elapsed * m.speed * 0.65;
+        y = 0.6 + ((i * 5) % 9) * 0.48 + Math.sin(elapsed * 1.6 + m.phase) * 0.45;
+        s = m.scale * 0.78 * (0.75 + 0.35 * Math.sin(elapsed * 2.4 + m.phase));
+      } else {
+        s = m.scale * (0.7 + 0.4 * (0.5 + 0.5 * Math.sin(elapsed * 3.1 + m.phase)));
+      }
+
+      this.scratchPos.set(Math.cos(angle) * r, y, Math.sin(angle) * r);
+      this.scratchScale.set(s, s, s);
+      this.scratchMatrix.makeRotationY(elapsed * m.spinSpeed + m.phase);
+      this.scratchMatrix.scale(this.scratchScale);
+      this.scratchMatrix.setPosition(this.scratchPos);
+      this.ambientMesh.setMatrixAt(i, this.scratchMatrix);
+    }
+    this.ambientMesh.instanceMatrix.needsUpdate = true;
+  }
+
+  private fitCamera(): void {
+    const w = this.container.clientWidth;
+    const h = this.container.clientHeight;
+    if (w <= 0 || h <= 0) return;
+    const distance = cameraFitDistance(w / h, this.baseDistance, this.viewHalfExtent, FOV);
+    if (!Number.isFinite(distance)) return;
+
+    this.fittedDistance = distance;
+    this.camera.aspect = w / h;
+    this.camera.updateProjectionMatrix();
+    this.applyCameraTransform();
+  }
+
+  private applyCameraTransform(): void {
+    const dist = this.fittedDistance * this.currentZoom;
+    const scale = dist / this.baseDistance;
+    this.fog.near = FOG_NEAR * scale;
+    this.fog.far = FOG_FAR * scale;
+
+    const lookX = this.currentFollowX + this.currentLookX;
+    const lookZ = this.currentFollowZ + this.currentLookZ;
+
+    this.camera.position.set(
+      this.currentFollowX + this.cameraDir.x * dist + this.currentLookX * 0.45,
+      this.cameraDir.y * dist - this.currentLookZ * 0.2,
+      this.currentFollowZ + this.cameraDir.z * dist + this.currentLookZ * 0.3,
+    );
+    this.camera.lookAt(lookX, 0, lookZ);
+    this.camera.updateMatrixWorld();
+
+    this.fillLight.position.set(this.currentFollowX - 10, 8, this.currentFollowZ - 9);
+    this.accentLight.position.set(this.currentFollowX + 10, 7, this.currentFollowZ + 10);
   }
 }

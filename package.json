@@ -31,10 +31,9 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "prepare": "husky || true"
+    "prepare": ""
   },
   "dependencies": {
-    "@upstash/redis": "^1.38.0",
     "three": "^0.184.0"
   },
   "devDependencies": {

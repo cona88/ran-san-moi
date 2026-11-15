@@ -1,129 +1,128 @@
-<h1 align="center">🐍 Neon Snake 3D</h1>
+<h1 align="center">✨ Vương Quốc Rắn Phép Thuật 3D — Thế Giới Mở Săn Bot 360°</h1>
 
 <p align="center">
-  A synthwave take on Snake — rendered in 3D with Three.js, driven by a
-  <strong>pure, deterministic, fully-tested game core</strong>.
+  Trò chơi rắn phép thuật 3D thế giới mở phong cách <em>Snake Clash!</em> dành cho tay cầm <strong>PlayStation DualSense trên macOS</strong>: lái 360° mượt mà, săn 15 rắn Bot AI, cướp sức mạnh phép thuật, đấu Boss <strong>Đại Vương Rồng</strong>, kích hoạt 3 Boosters miễn phí và chinh phục câu đố trí tuệ!
 </p>
-
-<p align="center">
-  <a href="https://snake-3d-lyart.vercel.app">
-    <img alt="Live demo" src="https://img.shields.io/badge/demo-live-000000?logo=vercel&logoColor=white" />
-  </a>
-  <a href="https://github.com/samuel-cabral/snake-3d/actions/workflows/ci.yml">
-    <img alt="CI" src="https://github.com/samuel-cabral/snake-3d/actions/workflows/ci.yml/badge.svg" />
-  </a>
-  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white" />
-  <img alt="Three.js" src="https://img.shields.io/badge/Three.js-r184-000000?logo=three.js&logoColor=white" />
-  <img alt="Tests" src="https://img.shields.io/badge/core%20coverage-~99%25-4c1" />
-  <img alt="License" src="https://img.shields.io/badge/license-MIT-blue" />
-</p>
-
-<p align="center">
-  <img src="docs/media/gameplay.png" alt="Neon Snake 3D gameplay" width="640" />
-</p>
-
-<p align="center"><strong>▶ Play it live: https://snake-3d-lyart.vercel.app</strong></p>
 
 ---
 
-## Why this repo is interesting
+## 🚀 Cách mở game nhanh trên macOS
 
-It's a small game, engineered like production software. The point isn't the
-gameplay — it's the **separation of concerns** that makes that gameplay
-trivially testable and easy to evolve:
+### Cách 1: Nhấp đúp khởi chạy (Dành cho bé & bố mẹ)
 
-- **A pure, headless game core** (`src/core`) with zero browser or Three.js
-  dependencies. The entire simulation is `reduce(state, action) -> state`, so
-  every rule — movement, collision, growth, food spawning, the shrinking
-  arena, the win condition — is unit-tested in milliseconds. **~99% coverage,
-  enforced in CI.**
-- **A seedable RNG threaded through immutable state**, making food placement
-  reproducible: tests assert exact spawns; the same seed replays identically.
-- **A fixed-timestep loop with render interpolation** — deterministic
-  simulation decoupled from frame rate, smooth motion between ticks.
-- **Adapter layers** for rendering, input, audio, UI and storage, each
-  depending on the core but never the other way around.
-- **A real toolchain:** TypeScript (strict, `noUncheckedIndexedAccess`),
-  Vitest with coverage gates, Playwright E2E, ESLint + Prettier, a Husky
-  pre-commit hook, a GitHub Actions quality gate, and deployment to Vercel.
+1. Nhấp đúp vào tệp **`Chơi Rắn Phép Thuật 3D.command`** ngay trong thư mục trò chơi.
+   - _(Mẹo macOS: Lần đầu tiên mở file `.command`, nếu macOS hiện thông báo bảo mật, hãy **nhấp chuột phải → Open (Mở)** một lần là dùng mãi về sau)._
+2. Trình duyệt (**ưu tiên Google Chrome hoặc Microsoft Edge** để bật được đèn LED đổi màu trên tay cầm DualSense) sẽ tự động mở trò chơi!
+3. Khi chơi xong, chỉ cần đóng cửa sổ Terminal hoặc nhấn `Ctrl + C`.
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full picture and
-[`docs/adr/`](docs/adr) for the decisions behind it.
+### Cách 2: Chạy bằng dòng lệnh
 
-## Gameplay
+Yêu cầu **Node.js >= 22**:
 
-| Action          | Keys                                           |
-| --------------- | ---------------------------------------------- |
-| Move            | Arrow keys / `W` `A` `S` `D` / on-screen d-pad |
-| Start / restart | `Space` / `Enter` / tap                        |
-| Pause           | `P` / `Esc`                                    |
-
-- **Shrinking arena** — every few foods the neon walls close in, raising the
-  pressure.
-- **Difficulty presets** — Easy / Normal / Hard tune speed and how fast the
-  arena tightens.
-- **Synthesized audio** — eat/crash effects via the Web Audio API, no assets.
-- **Persistent best score and settings** via `localStorage`.
-
-## Architecture at a glance
-
-```
-            input ─┐
-                   ▼
-   ui  ◀──  app (composition root)  ──▶  rendering (Three.js)
-                   │   ▲
-            audio ─┘   │ reads state
-                       ▼
-                 core (pure)   ◀── platform (storage)
-        reduce(state, action) -> state   ·   seedable RNG
+```zsh
+npm install
+npm run dev
 ```
 
-The dependency rule is one-directional: **`core` knows nothing about the
-browser**; everything else depends on `core`.
+Sau đó mở địa chỉ `http://localhost:5173` trên Google Chrome / Edge / Safari.
 
-## Tech stack
+---
 
-TypeScript · Three.js · Vite · Vitest · Playwright · ESLint · Prettier ·
-Husky · GitHub Actions
+## 🌍 Thế Giới Mở Săn Bot 3D (`112 × 112`) & Boss Đại Vương Rồng
 
-## Getting started
+- **Lái 360° mượt mà**: Trườn tự do khắp đấu trường mở, **không tự chết khi cắt ngang thân mình**.
+- **Luật săn Bot thông minh**:
+  - **Ăn Bot cấp thấp hơn (`Bot Lv <= Bé Lv`)**: Nuốt gọn Bot để lên cấp nhanh, rải chùm ngọc loot và **hấp thụ sức mạnh đặc biệt của Bot** (bắn nhanh x2 🌸, hào quang đóng băng 🦋, siêu nam châm ⚡, hoặc khiên hồi tim 🍀)!
+  - **Bắn đạn giảm cấp Bot mạnh hơn (`Bot Lv > Bé Lv`)**: Bấm `R2` / `□` / `Space` bắn đạn phép để hạ cấp Bot cao hơn xuống rồi xử đẹp!
+- **Thanh Tiến Trình Boss & 👹 Đại Vương Rồng**: Thu thập ngọc vàng, ăn Bot và giải câu đố để làm đầy thanh tiến trình Boss phía trên (`0% → 100%`) và triệu hồi Boss Đại Vương Rồng khổng lồ!
+- **Bảng Xếp Hạng Trực Tiếp & La Bàn Vương Miện `👑`**: Theo dõi thứ hạng tức thì ở góc phải trên và đi theo mũi tên chỉ hướng `👑` ở góc phải dưới để săn Top 1 hoặc Boss!
 
-Requires **Node 22+** and **pnpm**.
+---
 
-```sh
-pnpm install
-pnpm dev          # http://localhost:5173
+## ⚡ 3 Nút Sức Mạnh (Boosters Miễn Phí — Không Quảng Cáo)
+
+Mỗi ván chơi bé khởi đầu với `x1` lượt miễn phí cho cả 3 Booster (tối đa `x3` lượt, nhận thêm khi **ăn mỗi 3 Bot**, **giải đúng BrainQuest**, hoặc **hạ gục Boss**):
+
+| Booster         | Phím DualSense | Bàn phím | Hiệu ứng                                                 |
+| :-------------- | :------------- | :------- | :------------------------------------------------------- |
+| **Lv +10**      | `L3`           | `Z`      | Tăng ngay **+10 Cấp độ** và kéo dài rắn tức thì!         |
+| **⚡ Tốc Độ**   | `Create/Share` | `X`      | Tăng siêu tốc độ lướt & tạo khiên miễn nhiễm va chạm!    |
+| **🧲 Nam Châm** | `R3`           | `C`      | Hút toàn bộ ngọc vàng & ngọc loot từ khoảng cách cực xa! |
+
+---
+
+## 🎮 Hướng dẫn kết nối tay cầm DualSense trên macOS
+
+### Kết nối có dây (USB-C — Khuyên dùng để đổi màu Đèn LED)
+
+1. Dùng cáp USB-C nối tay cầm **DualSense** với máy Mac.
+2. Mở game trên **Google Chrome** hoặc **Microsoft Edge** và bấm một nút bất kỳ (như `✕`) để trình duyệt nhận tay cầm.
+3. Trên thanh HUD góc trái trên, bấm nút **`✨ Bật Đèn LED DualSense`** và chọn _DualSense Wireless Controller_ trong hộp thoại trình duyệt — đèn Lightbar trên tay cầm sẽ tự đổi màu theo 4 hình dạng phép thuật của bé!
+
+### Kết nối không dây (Bluetooth)
+
+1. Đảm bảo tay cầm đang tắt đèn. Nhấn giữ đồng thời nút **Create** (góc trên bên trái phím D-Pad) và nút **PS** khoảng 3–5 giây đến khi đèn xanh dương nhấp nháy nhanh.
+2. Trên máy Mac, vào **System Settings → Bluetooth**, chọn **DualSense Wireless Controller** → **Connect**.
+3. Mở game và bấm nút bất kỳ trên tay cầm để huy hiệu góc trên chuyển sang **`🎮 DualSense đã kết nối!`**.
+
+> 💡 **Lưu ý trình duyệt trên macOS:** Chrome và Edge hỗ trợ đầy đủ cả **Tay cầm + Rung + Đèn LED WebHID**. Safari hỗ trợ Tay cầm và Rung nhưng chưa hỗ trợ WebHID đổi màu đèn LED. Bé vẫn luôn có thể chơi kết hợp hoặc dùng bàn phím bình thường!
+
+---
+
+## 🕹️ Sơ đồ điều khiển 360° DualSense & Bàn phím
+
+| Hành động                  | Tay cầm DualSense                                  | Bàn phím macOS                             |
+| :------------------------- | :------------------------------------------------- | :----------------------------------------- |
+| **Lái rắn 360° / 8 hướng** | `Left Stick` (360°) hoặc `D-Pad` (8 hướng)         | `W` `A` `S` `D` / Mũi tên (tổ hợp 8 hướng) |
+| **Bắn phép giảm cấp Bot**  | `R2` hoặc `□` _(giữ để bắn liên tục)_              | `Space` hoặc `J`                           |
+| **Biến hình tiến / lùi**   | `△` / `R1` (tiến), `L1` (lùi), `Touchpad`          | `E` / `Q` hoặc phím `1` `2` `3` `4`        |
+| **Lướt nhanh (Dash)**      | Giữ `✕` hoặc `L2`                                  | Giữ `Shift` hoặc `K`                       |
+| **Khiên Bong Bóng**        | `○`                                                | `F` hoặc `L`                               |
+| **3 Nút Boosters**         | `L3` (+10 Cấp), `Create` (Tốc Độ), `R3` (Nam Châm) | `Z`, `X`, `C`                              |
+| **Nghiêng góc nhìn 3D**    | `Right Stick`                                      | —                                          |
+| **Bắt đầu / Chơi lại**     | `✕`                                                | `Enter` (hoặc bấm nút trên màn hình)       |
+| **Tạm dừng / Tiếp tục**    | `Options`                                          | `P` hoặc `Esc`                             |
+
+---
+
+## ✨ 4 Hình Dạng Phép Thuật, 3 Chế Độ & 4 Chủ Đề 3D
+
+### 4 Hình Dạng Biến Hình Chiến Thuật
+
+- **🌸 Rồng Tinh Tú (`1`)** — _Đạn Sao Băng_: Bắn Đạn Sao Băng sát thương cao hạ cấp Bot & phá chướng ngại vật.
+- **🦋 Phượng Hoàng Băng (`2`)** — _Sóng Băng 3 Tia_: Phóng 3 tia băng hình quạt làm chậm & đóng băng Bot, quái vật.
+- **⚡ Kỳ Lân Ánh Sáng (`3`)** — _Tia Chớp Tự Tìm_: Tia Chớp xuyên thấu tự tìm Bot gần nhất & mở rộng nam châm hút ngọc.
+- **🍀 Tinh Linh Rừng Xanh (`4`)** — _Bom Hoa Nở Vùng Rộng_: Hạt giống nổ vùng rộng trừ cấp cụm Bot, phá quái & nở kẹo thưởng.
+
+### 3 Chế Độ Chơi & 4 Chủ Đề Thế Giới 3D
+
+- **🌟 Phiêu Lưu Thông Minh**: Đấu trường 15 Bot AI, Cổng Nguyên Tố, quái tuần tra và câu đố `+10 Cấp`.
+- **⚡ Phản Xạ Siêu Tốc**: Nhịp độ sôi động hơn với 16 Bot, thiên thạch cảnh báo và nhiều cơ hội săn thưởng.
+- **🧘 Thư Giãn Xuyên Tường**: Rắn đi xuyên qua dải biên cầu vồng êm dịu, nhẹ nhàng săn ngọc và giải đố.
+- **4 Chủ đề thế giới 3D** (đổi ngay trên màn hình bắt đầu hoặc nút `🎨` góc phải trên):
+  - **🍯 Tổ Ong Vàng** _(Mặc định)_ — Đấu trường tổ ong lục giác vàng ấm áp rực rỡ phong cách _Snake Clash!_.
+  - **🌸 Vườn Pha Lê** — Pha lê tím hồng & đom đóm lung linh.
+  - **🌌 Ngân Hà Ánh Sao** — Bầu trời sao đêm & viền cầu vồng.
+  - **🍭 Đảo Kẹo Ngọt** — Hồng đào bạc hà ngọt ngào tươi sáng.
+- **🏷️ Biệt Danh Rắn Tiên**: Bé có thể đặt biệt danh tùy thích trên màn hình bắt đầu (mặc định **`Bé Tiên`**) để tỏa sáng trên Bảng Xếp Hạng Trực Tiếp!
+
+### 🧠 Nhiệm Vụ Thông Minh (`BrainQuest`)
+
+- **Toán Thần Tốc**, **Thứ Tự Ánh Sao (`1 → 2 → 3`)**, và **Biến Hình Phép Thuật**.
+- Chọn nhầm **không bao giờ bị trừ tim** — bảng nhiệm vụ chỉ hiện gợi ý khích lệ dịu dàng để bé thử lại.
+- Giải đúng mỗi câu đố thưởng ngay **+10 Cấp độ** + điểm lớn + **+1 lượt Booster**, và mỗi **3 câu đố** thưởng thêm **+1 Trái Tim phép thuật**!
+
+---
+
+## 🛠️ Lệnh kiểm tra cho lập trình viên
+
+```zsh
+npm test          # Chạy toàn bộ unit tests (Vitest)
+npm run typecheck # Kiểm tra TypeScript (tsc --noEmit)
+npm run lint      # Kiểm tra ESLint
+npm run build     # Đóng gói bản production vào dist/
 ```
 
-### Scripts
+## 📄 Giấy phép
 
-| Command                     | What it does                   |
-| --------------------------- | ------------------------------ |
-| `pnpm dev`                  | Start the Vite dev server      |
-| `pnpm build`                | Typecheck and build to `dist/` |
-| `pnpm preview`              | Serve the production build     |
-| `pnpm test`                 | Run unit tests                 |
-| `pnpm test:coverage`        | Unit tests with coverage gates |
-| `pnpm e2e`                  | Playwright end-to-end tests    |
-| `pnpm lint` / `pnpm format` | Lint / format                  |
-
-## Project structure
-
-```
-src/
-  core/        pure simulation — types, rng, systems, reducer, state machine
-  rendering/   Three.js adapter — scene, board, snake, food, bloom
-  input/       keyboard + touch -> semantic control events
-  audio/       Web Audio sound effects
-  ui/          HUD, overlays, settings (DOM)
-  platform/    localStorage adapter
-  app/         composition root + game loop
-tests/
-  unit/        Vitest — the whole core (+ storage)
-  e2e/         Playwright — full play-flow smoke
-docs/          architecture + ADRs
-```
-
-## License
-
-[MIT](LICENSE) © Samuel Cabral Lima
+Phát hành theo giấy phép [MIT](LICENSE) © Samuel Cabral Lima (phát triển tiếp cho trải nghiệm DualSense macOS & thiếu nhi).

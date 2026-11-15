@@ -31,10 +31,4 @@ export default tseslint.config(
       globals: { ...globals.node },
     },
   },
-  {
-    files: ['api/**'],
-    languageOptions: {
-      globals: { ...globals.node },
-    },
-  },
 );

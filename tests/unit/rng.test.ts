@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createRng, nextInt, nextRandom } from '../../src/core/rng';
+import { createRng, nextFloat, nextInt, nextRandom } from '../../src/core/rng';
 
 describe('rng', () => {
   it('is deterministic: same state yields the same value', () => {
@@ -34,11 +34,14 @@ describe('rng', () => {
     }
   });
 
-  it('different seeds diverge', () => {
+  it('different seeds diverge and handles non-positive nextInt', () => {
     const firsts = new Set<number>();
     for (let seed = 1; seed <= 8; seed++) {
       firsts.add(nextInt(createRng(seed), 1000).value);
     }
     expect(firsts.size).toBeGreaterThan(1);
+    const rng = createRng(5);
+    expect(nextFloat(rng)).toEqual(nextRandom(rng));
+    expect(nextInt(rng, 0)).toEqual({ value: 0, next: rng });
   });
 });

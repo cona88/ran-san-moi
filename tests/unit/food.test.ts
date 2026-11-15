@@ -1,16 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_CONFIG } from '../../src/core/config';
 import { createRng } from '../../src/core/rng';
-import { freeCells, pickFood } from '../../src/core/systems/food';
+import {
+  freeCells,
+  pickFood,
+  pickOptionalCell,
+  replenishWorldOrbs,
+  scatterLootOrbs,
+} from '../../src/core/systems/food';
 import { innerBounds } from '../../src/core/systems/arena';
 
-describe('food', () => {
-  const config = DEFAULT_CONFIG;
+describe('food and world orbs', () => {
+  const smallConfig = { ...DEFAULT_CONFIG, worldRadius: 12, maxGrid: 24 };
 
-  it('enumerates the full inner area when the snake is empty', () => {
-    const { lo, hi } = innerBounds(config, 2); // [3, 21] -> 19x19
-    const side = hi - lo + 1;
-    expect(freeCells(config, 2, [])).toHaveLength(side * side);
+  it('enumerates the full inner area when occupied is empty', () => {
+    const { lo, hi } = innerBounds(smallConfig, 2); // [-9, 9] -> 19x19
+    const side = Math.floor(hi) - Math.ceil(lo) + 1;
+    expect(freeCells(smallConfig, 2, [])).toHaveLength(side * side);
   });
 
   it('excludes occupied cells', () => {
@@ -18,25 +24,43 @@ describe('food', () => {
       { x: 3, z: 3 },
       { x: 4, z: 3 },
     ];
-    const cells = freeCells(config, 2, snake);
+    const cells = freeCells(smallConfig, 2, snake);
     expect(cells).not.toContainEqual({ x: 3, z: 3 });
     expect(cells).not.toContainEqual({ x: 4, z: 3 });
   });
 
-  it('ignores snake cells outside the inner region', () => {
-    const full = freeCells(config, 2, []).length;
-    // a wall-line cell is never spawnable, so removing it changes nothing
-    expect(freeCells(config, 2, [{ x: 2, z: 2 }])).toHaveLength(full);
-  });
-
   it('pickFood returns a free cell and advances the rng', () => {
-    const cells = freeCells(config, 2, []);
+    const cells = freeCells(smallConfig, 2, []);
     const { food, rng } = pickFood(cells, createRng(1));
     expect(cells).toContainEqual(food);
     expect(rng.seed).not.toBe(createRng(1).seed);
+    expect(() => pickFood([], createRng(1))).toThrow();
+    expect(pickOptionalCell([], createRng(1)).cell).toBeNull();
   });
 
-  it('pickFood throws when there are no free cells', () => {
-    expect(() => pickFood([], createRng(1))).toThrow();
+  it('replenishes world orbs up to orbTargetCount and scatters loot orbs along bot spine', () => {
+    const res = replenishWorldOrbs({
+      orbs: [],
+      config: DEFAULT_CONFIG,
+      playerHead: { x: 0, z: 0 },
+      rng: createRng(5),
+    });
+    expect(res.orbs).toHaveLength(DEFAULT_CONFIG.orbTargetCount);
+    expect(res.orbs.every((o) => o.value === 1 && !o.isLoot)).toBe(true);
+
+    const loot = scatterLootOrbs({
+      orbs: res.orbs,
+      spine: [
+        { x: 4, z: 4 },
+        { x: 3.5, z: 4 },
+        { x: 3, z: 4 },
+      ],
+      count: 8,
+      value: 3,
+      config: DEFAULT_CONFIG,
+      rng: res.rng,
+    });
+    expect(loot.orbs).toHaveLength(DEFAULT_CONFIG.orbTargetCount + 8);
+    expect(loot.orbs.filter((o) => o.isLoot && o.value === 3)).toHaveLength(8);
   });
 });

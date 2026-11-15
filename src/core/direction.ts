@@ -8,6 +8,13 @@ const DELTA: Record<Direction, Cell> = {
   right: { x: 1, z: 0 },
 };
 
+const PERPENDICULARS: Record<Direction, readonly [Direction, Direction]> = {
+  up: ['left', 'right'],
+  down: ['right', 'left'],
+  left: ['up', 'down'],
+  right: ['down', 'up'],
+};
+
 /** The grid step for a direction. */
 export function delta(direction: Direction): Cell {
   return DELTA[direction];
@@ -18,4 +25,9 @@ export function isOpposite(a: Direction, b: Direction): boolean {
   const da = DELTA[a];
   const db = DELTA[b];
   return da.x === -db.x && da.z === -db.z;
+}
+
+/** The two directions perpendicular to `direction`. */
+export function perpendicularDirections(direction: Direction): readonly [Direction, Direction] {
+  return PERPENDICULARS[direction];
 }

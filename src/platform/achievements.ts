@@ -2,20 +2,124 @@ export interface AchievementDef {
   readonly id: string;
   readonly name: string;
   readonly description: string;
+  readonly icon?: string;
 }
 
 export const ACHIEVEMENTS: readonly AchievementDef[] = [
-  { id: 'first-bite', name: 'First Bite', description: 'Eat your first food.' },
-  { id: 'halfway-there', name: 'Halfway There', description: 'Reach a score of 10.' },
-  { id: 'iron-wall', name: 'Iron Wall', description: 'Survive 3 wall shrinks in one run.' },
-  { id: 'speed-demon', name: 'Speed Demon', description: 'Reach a score of 20.' },
-  { id: 'perfectionist', name: 'Perfectionist', description: 'Win by filling the board.' },
-  { id: 'comeback-kid', name: 'Comeback Kid', description: 'Beat your best by 5 or more.' },
-  { id: 'night-crawler', name: 'Night Crawler', description: 'Play between midnight and 4am.' },
-  { id: 'three-day-streak', name: 'Getting Started', description: '3-day daily-challenge streak.' },
-  { id: 'week-streak', name: 'Committed', description: '7-day daily-challenge streak.' },
-  { id: 'neon-regular', name: 'Neon Regular', description: '30-day daily-challenge streak.' },
-  { id: 'top-three', name: 'Podium', description: 'Reach top 3 on a leaderboard.' },
+  {
+    id: 'first-bite',
+    name: 'Khởi Đầu Phép Thuật',
+    description: 'Thu thập viên pha lê đầu tiên trong vương quốc!',
+    icon: '✨',
+  },
+  {
+    id: 'halfway-there',
+    name: 'Ngôi Sao Tỏa Sáng',
+    description: 'Đạt mốc 100 điểm lung linh trong một hành trình!',
+    icon: '🌟',
+  },
+  {
+    id: 'speed-demon',
+    name: 'Huyền Thoại Rắn Tiên',
+    description: 'Chinh phục mốc 300 điểm rực rỡ!',
+    icon: '👑',
+  },
+  {
+    id: 'meteor-shooter',
+    name: 'Xạ Thủ Sao Băng',
+    description: 'Hạ gục 5 quái vật bằng đạn phép thuật!',
+    icon: '🏹',
+  },
+  {
+    id: 'shape-shifter',
+    name: 'Bậc Thầy Biến Hình',
+    description: 'Biến hình qua đủ cả 4 linh thú phép thuật!',
+    icon: '🦋',
+  },
+  {
+    id: 'bright-mind',
+    name: 'Trí Tuệ Tỏa Sáng',
+    description: 'Giải đúng 5 câu đố thông minh trong một ván!',
+    icon: '🧠',
+  },
+  {
+    id: 'shield-guardian',
+    name: 'Chiến Binh Bong Bóng',
+    description: 'Dùng Khiên Bong Bóng chặn nguy hiểm 2 lần!',
+    icon: '🫧',
+  },
+  {
+    id: 'iron-wall',
+    name: 'Trái Tim Bền Bỉ',
+    description: 'Vượt qua 3 lần thu hẹp sân chơi an toàn!',
+    icon: '🛡️',
+  },
+  {
+    id: 'perfectionist',
+    name: 'Nữ Hoàng Vương Quốc',
+    description: 'Chiến thắng rực rỡ bằng cách lấp đầy toàn bộ sân chơi!',
+    icon: '💎',
+  },
+  {
+    id: 'comeback-kid',
+    name: 'Vượt Chính Mình',
+    description: 'Phá kỷ lục cũ của bản thân thêm từ 50 điểm trở lên!',
+    icon: '🚀',
+  },
+  {
+    id: 'night-crawler',
+    name: 'Cú Đêm Ngắm Sao',
+    description: 'Phiêu lưu giữa đêm khuya lung linh ánh sao.',
+    icon: '🌙',
+  },
+  {
+    id: 'three-day-streak',
+    name: 'Khởi Động Đều Đặn',
+    description: 'Chơi vui vẻ 3 ngày liên tiếp!',
+    icon: '🌱',
+  },
+  {
+    id: 'week-streak',
+    name: 'Bạn Thân Vương Quốc',
+    description: 'Đồng hành cùng Rắn Tiên suốt 7 ngày liền!',
+    icon: '🌸',
+  },
+  {
+    id: 'neon-regular',
+    name: 'Ngôi Sao Kiên Trì',
+    description: 'Chuỗi 30 ngày phiêu lưu kỳ diệu!',
+    icon: '🌈',
+  },
+  {
+    id: 'top-three',
+    name: 'Bảng Vàng Vinh Danh',
+    description: 'Ghi danh vào Top 3 kỷ lục cá nhân!',
+    icon: '🏆',
+  },
+  {
+    id: 'bot-hunter',
+    name: 'Thợ Săn Nhí',
+    description: 'Nuốt chửng rắn Bot đầu tiên trong đấu trường!',
+    icon: '🐍',
+  },
+  {
+    id: 'honeycomb-champion',
+    name: 'Bá Chủ Tổ Ong',
+    description: 'Hạ gục và ăn gọn 5 rắn Bot trong một trận đấu!',
+    icon: '🍯',
+  },
+  {
+    id: 'dragon-slayer',
+    name: 'Dũng Sĩ Diệt Rồng',
+    description: 'Đánh bại Boss Đại Vương Rồng uy lực!',
+    icon: '🐉',
+  },
+  {
+    id: 'crown-queen',
+    name: 'Nữ Hoàng Vương Miện',
+    description: 'Vươn lên chiếm ngôi Hạng #1 trên Bảng Xếp Hạng!',
+    icon: '👑',
+  },
 ];
 
 export interface RunEvent {
@@ -25,6 +129,13 @@ export interface RunEvent {
   readonly bestAtRunStart: number;
   readonly pendingShrinkSurvivals: number;
   readonly hour: number;
+  readonly enemiesDefeated?: number;
+  readonly formsUsedCount?: number;
+  readonly questsSolved?: number;
+  readonly shieldBlocks?: number;
+  readonly botsEaten?: number;
+  readonly bossesDefeated?: number;
+  readonly playerRank?: number;
 }
 
 /** Pure: given one run's state and the already-unlocked set, return newly-unlocked ids. */
@@ -35,16 +146,24 @@ export function evaluateRunAchievements(event: RunEvent, unlocked: ReadonlySet<s
   };
 
   maybeUnlock('first-bite', event.nextScore >= 1);
-  maybeUnlock('halfway-there', event.nextScore >= 10);
-  maybeUnlock('speed-demon', event.nextScore >= 20);
+  maybeUnlock('halfway-there', event.nextScore >= 100);
+  maybeUnlock('speed-demon', event.nextScore >= 300);
+  maybeUnlock('meteor-shooter', (event.enemiesDefeated ?? 0) >= 5);
+  maybeUnlock('shape-shifter', (event.formsUsedCount ?? 0) >= 4);
+  maybeUnlock('bright-mind', (event.questsSolved ?? 0) >= 5);
+  maybeUnlock('shield-guardian', (event.shieldBlocks ?? 0) >= 2);
   maybeUnlock('iron-wall', event.pendingShrinkSurvivals >= 3);
   maybeUnlock('night-crawler', event.hour >= 0 && event.hour < 4);
+  maybeUnlock('bot-hunter', (event.botsEaten ?? 0) >= 1);
+  maybeUnlock('honeycomb-champion', (event.botsEaten ?? 0) >= 5);
+  maybeUnlock('dragon-slayer', (event.bossesDefeated ?? 0) >= 1);
+  maybeUnlock('crown-queen', event.playerRank === 1);
 
   if (event.isGameOver) {
     maybeUnlock('perfectionist', event.won);
     maybeUnlock(
       'comeback-kid',
-      event.bestAtRunStart > 0 && event.nextScore - event.bestAtRunStart >= 5,
+      event.bestAtRunStart > 0 && event.nextScore - event.bestAtRunStart >= 50,
     );
   }
 
@@ -66,7 +185,7 @@ export function evaluateStreakAchievements(
   return newly;
 }
 
-/** Pure: given a leaderboard rank (1-based, null if unranked), return newly-unlocked ids. */
+/** Pure: given a local leaderboard rank (1-based, null if unranked), return newly-unlocked ids. */
 export function evaluateLeaderboardAchievements(
   rank: number | null,
   unlocked: ReadonlySet<string>,
@@ -99,7 +218,7 @@ export function loadUnlockedAchievements(): Set<string> {
   try {
     const parsed: unknown = JSON.parse(raw);
     return Array.isArray(parsed)
-      ? new Set(parsed.filter((id) => typeof id === 'string'))
+      ? new Set(parsed.filter((id): id is string => typeof id === 'string'))
       : new Set();
   } catch {
     return new Set();
