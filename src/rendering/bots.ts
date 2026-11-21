@@ -53,6 +53,11 @@ interface BotVisual {
   readonly isBoss: boolean;
   readonly root: Group;
   readonly headGroup: Group;
+  readonly eyeGroups: Group[];
+  readonly chompShell: Mesh<RoundedBoxGeometry, MeshBasicMaterial>;
+  readonly chompShellMat: MeshBasicMaterial;
+  readonly chompHalo: Mesh<RingGeometry, MeshBasicMaterial>;
+  readonly chompHaloMat: MeshBasicMaterial;
   readonly iceBlock: Mesh<RoundedBoxGeometry, MeshStandardMaterial>;
   readonly bossAura?: Mesh<RingGeometry, MeshBasicMaterial>;
   readonly crownGroup: Group;
@@ -98,7 +103,8 @@ export class BotsView {
   private readonly hornGeo = new ConeGeometry(0.095, 0.46, 6);
   private readonly crestFinGeo = new ConeGeometry(0.12, 0.48, 4);
   private readonly iceCubeGeo = new RoundedBoxGeometry(1.06, 1.02, 1.06, 2, 0.14);
-  private readonly bossAuraGeo = new RingGeometry(0.7, 1.05, 28);
+  private readonly bossAuraGeo = new RingGeometry(0.7, 1.08, 8);
+  private readonly chompHaloGeo = new RingGeometry(0.56, 0.94, 24);
 
   // Shared face & status materials
   private readonly eyeWhiteMat = new MeshBasicMaterial({ color: 0xffffff });
@@ -320,30 +326,67 @@ export class BotsView {
       this.playerFocus.set(0, 0, 0);
     }
 
+    // Subtle material shimmer for armored gems, boss horns, boss aura & frozen cubes
+    this.goldArmorGemMat.emissiveIntensity = 0.65 + 0.24 * Math.sin(elapsed * 4.2);
+    this.bossHornMat.emissiveIntensity = 0.78 + 0.32 * Math.sin(elapsed * 5.2);
+    this.bossAuraMat.opacity = 0.5 + 0.22 * Math.sin(elapsed * 5.8);
+    this.iceCubeMat.emissiveIntensity = 0.45 + 0.25 * Math.sin(elapsed * 6.5);
+
     for (const vis of this.visuals.values()) {
       const bot = vis.bot;
+      const isChomped = (bot.chompedTicks ?? 0) > 0 && !gameover;
       const targetThickness = computeBotThicknessScale(bot.level, bot.isBoss);
       vis.currentThickness += (targetThickness - vis.currentThickness) * Math.min(1, dt * 8);
 
-      // 1. Head interpolation + rotation
+      // 1. Head interpolation + rotation + startled chomped reaction
       vis.headWorldPos.lerpVectors(vis.headFrom, vis.headTo, a);
       const headScale = vis.currentThickness * 0.96;
       const headBaseY = Math.max(0.08, 0.35 * headScale - 0.42);
       const headBob = gameover ? 0 : Math.sin(elapsed * 4.2 + bot.id) * 0.04;
-      vis.headGroup.scale.setScalar(headScale);
+      const flashPulse = isChomped ? 0.5 + 0.5 * Math.sin(elapsed * 34 + bot.id * 1.3) : 0;
+      const chompHeadScale = isChomped
+        ? headScale * (1 + 0.08 * Math.sin(elapsed * 28 + bot.id))
+        : headScale;
+
+      vis.headGroup.scale.setScalar(chompHeadScale);
       vis.headGroup.position.set(vis.headWorldPos.x, headBaseY + headBob, vis.headWorldPos.z);
 
       const targetYaw = headingToYaw(bot.heading);
       const headingDiff = normalizeAngleDiff(targetYaw, vis.headHeadingY);
       vis.headHeadingY += headingDiff * Math.min(1, dt * 15);
       vis.headGroup.rotation.y = vis.headHeadingY;
+      vis.headGroup.rotation.z = isChomped ? Math.sin(elapsed * 42 + bot.id * 1.7) * 0.16 : 0;
+      vis.headGroup.rotation.x = isChomped ? Math.cos(elapsed * 34 + bot.id) * 0.08 : 0;
 
-      vis.iceBlock.visible = bot.frozenTicks > 0;
+      const eyeScale = isChomped ? 1.22 : 1;
+      for (const eyeGroup of vis.eyeGroups) {
+        eyeGroup.scale.setScalar(eyeScale);
+      }
+
+      vis.chompShell.visible = isChomped;
+      vis.chompHalo.visible = isChomped;
+      if (isChomped) {
+        vis.chompShellMat.opacity = 0.24 + 0.48 * flashPulse;
+        vis.chompShellMat.color.setHex(flashPulse > 0.5 ? 0xffffff : 0xffe478);
+        vis.chompHalo.position.set(vis.headWorldPos.x, -0.42, vis.headWorldPos.z);
+        vis.chompHalo.scale.setScalar(
+          (1.0 + 0.3 * flashPulse) * Math.max(0.9, vis.currentThickness * 0.88),
+        );
+        vis.chompHalo.rotation.z = elapsed * 6.5;
+        vis.chompHaloMat.opacity = 0.44 + 0.5 * flashPulse;
+      }
+
+      const isFrozen = bot.frozenTicks > 0;
+      vis.iceBlock.visible = isFrozen;
+      if (isFrozen) {
+        vis.iceBlock.rotation.y = Math.sin(elapsed * 4.5 + bot.id) * 0.08;
+      }
 
       if (vis.bossAura) {
-        vis.bossAura.position.set(vis.headWorldPos.x, -0.46, vis.headWorldPos.z);
-        const auraPulse = (1.25 + Math.sin(elapsed * 5.2) * 0.16) * (vis.currentThickness * 0.72);
+        vis.bossAura.position.set(vis.headWorldPos.x, -0.45, vis.headWorldPos.z);
+        const auraPulse = (1.3 + Math.sin(elapsed * 5.2) * 0.18) * (vis.currentThickness * 0.75);
         vis.bossAura.scale.setScalar(auraPulse);
+        vis.bossAura.rotation.z = elapsed * 1.4;
       }
 
       // 2. Tapered body interpolation
@@ -355,9 +398,12 @@ export class BotsView {
         const seg = vis.segments[i];
         if (!seg) continue;
 
-        const taper = 1.0 - 0.64 * (i / Math.max(1, count - 1));
+        const taper = count <= 1 ? 1.0 : 1.0 - 0.64 * (i / (count - 1));
         const segScale = vis.currentThickness * taper;
-        seg.mesh.scale.setScalar(segScale);
+        const chompSegScale = isChomped
+          ? segScale * (1 + 0.06 * Math.sin(elapsed * 28 - i * 0.9 + bot.id))
+          : segScale;
+        seg.mesh.scale.setScalar(chompSegScale);
         seg.mesh.position.lerpVectors(seg.from, seg.to, a);
 
         this.scratchForward.subVectors(seg.to, seg.from);
@@ -368,13 +414,16 @@ export class BotsView {
         }
         this.scratchPerp.set(-this.scratchForward.z, 0, this.scratchForward.x);
 
-        const waveAmp = gameover ? 0 : 0.036 * taper * Math.min(1, (i + 1) / 3);
-        const wave = Math.sin(elapsed * 5.8 - (i + 1) * 0.7 + bot.id) * waveAmp;
+        const baseWaveAmp = gameover ? 0 : 0.036 * taper * Math.min(1, (i + 1) / 3);
+        const waveAmp = isChomped ? baseWaveAmp * 1.85 : baseWaveAmp;
+        const waveFreq = isChomped ? 14.5 : 5.8;
+        const wave = Math.sin(elapsed * waveFreq - (i + 1) * 0.7 + bot.id) * waveAmp;
         const baseSegY = Math.max(0, 0.36 * segScale - 0.44);
         const bob = gameover ? 0 : Math.sin(elapsed * 4.2 - (i + 1) * 0.65 + bot.id) * 0.03;
         seg.mesh.position.addScaledVector(this.scratchPerp, wave);
         seg.mesh.position.y = baseSegY + bob;
         seg.mesh.rotation.y = Math.atan2(this.scratchForward.x, this.scratchForward.z);
+        seg.mesh.rotation.z = isChomped ? Math.sin(elapsed * 26 - i * 0.8 + bot.id) * 0.12 : 0;
 
         if (seg.dorsalGem) {
           seg.dorsalGem.rotation.y = elapsed * 2.1 + i * 0.4;
@@ -429,6 +478,7 @@ export class BotsView {
     this.crestFinGeo.dispose();
     this.iceCubeGeo.dispose();
     this.bossAuraGeo.dispose();
+    this.chompHaloGeo.dispose();
 
     this.eyeWhiteMat.dispose();
     this.pupilMat.dispose();
@@ -463,21 +513,38 @@ export class BotsView {
     const headMesh = new Mesh(this.headGeo, style.headMat);
     headGroup.add(headMesh);
 
-    // Cute expressive bot eyes
+    // Cute expressive bot eyes (grouped so each bot can widen eyes 1.22x independently)
+    const eyeGroups: Group[] = [];
     for (const xSign of [-1, 1] as const) {
+      const eyeGroup = new Group();
+      eyeGroup.position.set(xSign * 0.2, 0.16, 0.34);
+
       const white = new Mesh(this.eyeWhiteGeo, this.eyeWhiteMat);
-      white.position.set(xSign * 0.2, 0.16, 0.34);
       white.scale.set(0.95, 1.08, 0.72);
-      headGroup.add(white);
+      eyeGroup.add(white);
 
       const pupilMat = bot.skin === 'gold_armor' ? this.tealEyeMat : this.pupilMat;
       const pupil = new Mesh(this.pupilGeo, pupilMat);
-      pupil.position.set(xSign * 0.2, 0.16, 0.41);
-      headGroup.add(pupil);
+      pupil.position.set(0, 0, 0.07);
+      eyeGroup.add(pupil);
+
+      headGroup.add(eyeGroup);
+      eyeGroups.push(eyeGroup);
     }
 
     // Skin-specific head armor / horns / crest
     this.attachSkinHeadDetail(headGroup, bot.skin, bot.isBoss, style);
+
+    const chompShellMat = new MeshBasicMaterial({
+      color: 0xffe478,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+    });
+    const chompShell = new Mesh(this.headGeo, chompShellMat);
+    chompShell.scale.setScalar(1.13);
+    chompShell.visible = false;
+    headGroup.add(chompShell);
 
     const iceBlock = new Mesh(this.iceCubeGeo, this.iceCubeMat);
     iceBlock.position.y = 0.05;
@@ -485,6 +552,19 @@ export class BotsView {
     headGroup.add(iceBlock);
 
     root.add(headGroup);
+
+    const chompHaloMat = new MeshBasicMaterial({
+      color: 0xffe478,
+      transparent: true,
+      opacity: 0,
+      side: DoubleSide,
+      depthWrite: false,
+    });
+    const chompHalo = new Mesh(this.chompHaloGeo, chompHaloMat);
+    chompHalo.rotation.x = -Math.PI / 2;
+    chompHalo.position.y = -0.43;
+    chompHalo.visible = false;
+    root.add(chompHalo);
 
     let bossAura: Mesh<RingGeometry, MeshBasicMaterial> | undefined;
     if (bot.isBoss) {
@@ -521,6 +601,11 @@ export class BotsView {
       isBoss: bot.isBoss,
       root,
       headGroup,
+      eyeGroups,
+      chompShell,
+      chompShellMat,
+      chompHalo,
+      chompHaloMat,
       iceBlock,
       bossAura,
       crownGroup,
@@ -603,9 +688,13 @@ export class BotsView {
   private syncBotSegmentsAndLabel(vis: BotVisual, bot: BotSnake, playerLevel: number): void {
     const style = this.skinStyles[bot.skin];
 
+    const headX = Number.isFinite(bot.head.x) ? bot.head.x : 0;
+    const headZ = Number.isFinite(bot.head.z) ? bot.head.z : 0;
     const prevHead = bot.prevHead ?? bot.head;
-    cellToWorld(prevHead.x, prevHead.z, this.half, vis.headFrom);
-    cellToWorld(bot.head.x, bot.head.z, this.half, vis.headTo);
+    const prevHeadX = Number.isFinite(prevHead.x) ? prevHead.x : headX;
+    const prevHeadZ = Number.isFinite(prevHead.z) ? prevHead.z : headZ;
+    cellToWorld(prevHeadX, prevHeadZ, this.half, vis.headFrom);
+    cellToWorld(headX, headZ, this.half, vis.headTo);
     if (vis.headFrom.distanceToSquared(vis.headTo) > TELEPORT_THRESHOLD_SQ) {
       vis.headFrom.copy(vis.headTo);
     }
@@ -640,9 +729,13 @@ export class BotsView {
       const seg = vis.segments[i];
       if (!cur || !seg) continue;
 
+      const curX = Number.isFinite(cur.x) ? cur.x : headX;
+      const curZ = Number.isFinite(cur.z) ? cur.z : headZ;
       const prev = bot.prevSpine[i + 1] ?? cur;
-      cellToWorld(prev.x, prev.z, this.half, seg.from);
-      cellToWorld(cur.x, cur.z, this.half, seg.to);
+      const prevX = Number.isFinite(prev.x) ? prev.x : curX;
+      const prevZ = Number.isFinite(prev.z) ? prev.z : curZ;
+      cellToWorld(prevX, prevZ, this.half, seg.from);
+      cellToWorld(curX, curZ, this.half, seg.to);
       if (seg.from.distanceToSquared(seg.to) > TELEPORT_THRESHOLD_SQ) {
         seg.from.copy(seg.to);
       }
@@ -664,6 +757,8 @@ export class BotsView {
   private disposeBotVisual(vis: BotVisual): void {
     this.root.remove(vis.root);
     vis.nameSpriteMat.dispose();
+    vis.chompShellMat.dispose();
+    vis.chompHaloMat.dispose();
     vis.segments = [];
   }
 }

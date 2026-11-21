@@ -20,7 +20,7 @@ import type { GameState, VisualTheme, WorldOrb } from '../core/types';
 import { THEMES } from './palette';
 import { cellToWorld } from './world';
 
-const MAX_WORLD_ORBS = 260;
+const MAX_WORLD_ORBS = 1500;
 
 interface SyncedOrb {
   id: number;

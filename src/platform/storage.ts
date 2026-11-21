@@ -1,4 +1,4 @@
-import type { Difficulty, GameMode, VisualTheme } from '../core/types';
+import type { Difficulty, GameMode, VisualTheme, AgeProfile } from '../core/types';
 
 /** Player-tunable options persisted between offline macOS sessions. */
 export interface Settings {
@@ -9,6 +9,7 @@ export interface Settings {
   readonly music: boolean;
   readonly vibration: boolean;
   readonly playerName?: string;
+  readonly ageProfile: AgeProfile;
 }
 
 export const DEFAULT_PLAYER_NAME = 'Bé Tiên';
@@ -28,6 +29,7 @@ export const DEFAULT_SETTINGS: Settings = {
   music: true,
   vibration: true,
   playerName: DEFAULT_PLAYER_NAME,
+  ageProfile: 'age6',
 };
 
 const BEST_KEY = 'neonSnakeBest';
@@ -38,6 +40,7 @@ const NICKNAME_MAX = 16;
 
 const MODES: readonly GameMode[] = ['adventure', 'reflex', 'cozy'];
 const DIFFICULTIES: readonly Difficulty[] = ['easy', 'normal', 'hard'];
+const AGE_PROFILES: readonly AgeProfile[] = ['age6', 'age9'];
 
 /** Read a key, swallowing the SecurityError thrown in private-mode browsers. */
 function safeGet(key: string): string | null {
@@ -103,8 +106,11 @@ export function loadSettings(): Settings {
     const vibration =
       typeof parsed['vibration'] === 'boolean' ? parsed['vibration'] : DEFAULT_SETTINGS.vibration;
     const playerName = sanitizePlayerName(parsed['playerName']);
+    const ageProfile = isOneOf(parsed['ageProfile'], AGE_PROFILES)
+      ? parsed['ageProfile']
+      : DEFAULT_SETTINGS.ageProfile;
 
-    return { mode, difficulty, theme, sound, music, vibration, playerName };
+    return { mode, difficulty, theme, sound, music, vibration, playerName, ageProfile };
   } catch {
     return DEFAULT_SETTINGS;
   }
@@ -122,6 +128,9 @@ export function saveSettings(settings: Settings): void {
     vibration:
       typeof settings.vibration === 'boolean' ? settings.vibration : DEFAULT_SETTINGS.vibration,
     playerName: sanitizePlayerName(settings.playerName),
+    ageProfile: isOneOf(settings.ageProfile, AGE_PROFILES)
+      ? settings.ageProfile
+      : DEFAULT_SETTINGS.ageProfile,
   };
   safeSet(SETTINGS_KEY, JSON.stringify(sanitized));
 }

@@ -1,10 +1,14 @@
 import { FORM_METADATA } from '../core/config';
 import type {
+  AgeProfile,
+  BoosterKind,
   Difficulty,
+  FairySkillKind,
   GameEvent,
   GameMode,
   GamePhase,
   GameState,
+  SnakeForm,
   VisualTheme,
 } from '../core/types';
 import type { ControllerStatus } from '../input/controls';
@@ -14,6 +18,7 @@ import { BoosterButtons } from './boosters';
 import { BossBar } from './bossBar';
 import { CrownRadarArrow } from './crownArrow';
 import { el } from './dom';
+import { FairySkillButtons } from './fairySkills';
 import { HudBar } from './hud';
 import { LeaderboardPanel } from './leaderboard';
 import { MagicBar } from './magicBar';
@@ -21,6 +26,46 @@ import { GameOverlay } from './overlay';
 import { ScorePopups } from './popups';
 import { QuestBanner } from './questBanner';
 import { themeLabelVi, type GameUICallbacks, type InitialUISettings } from './types';
+
+export type ControlFeedbackKind =
+  'steer' | 'shoot' | 'morph' | 'dash' | 'shield' | 'booster' | 'skill';
+
+const BOOSTER_PILL_MAP: Readonly<Record<BoosterKind, string>> = {
+  level: 'L3',
+  speed: 'Create',
+  magnet: 'R3',
+};
+
+const SKILL_PILLS_MAP: Readonly<Record<FairySkillKind, readonly string[]>> = {
+  flower: ['□'],
+  butterfly: ['R1'],
+  thunder: ['L1'],
+  fire: ['L2', '□'],
+  water: ['L2', '○'],
+  arcane: ['L2', '△'],
+};
+
+const SPRAY_HIT_POPUP: Readonly<
+  Record<SnakeForm, { readonly label: string; readonly color: string }>
+> = {
+  dragon: { label: '🔥 Cháy Rực!', color: '#ff7043' },
+  phoenix: { label: '❄️ Đóng Băng!', color: '#38f6ff' },
+  unicorn: { label: '🌊 Xối Nước!', color: '#29d8ff' },
+  spirit: { label: '🕸️ Trói Tơ!', color: '#4dff9a' },
+};
+
+function chompPopupStyle(streak: number, points: number): { label: string; color: string } {
+  if (streak >= 8) {
+    return { label: `ĐẠI TIỆC x${streak}! 👑`, color: '#ffd447' };
+  }
+  if (streak >= 5) {
+    return { label: `Rốp rốp! x${streak} ⚡`, color: '#38f6ff' };
+  }
+  if (streak >= 3) {
+    return { label: `Măm măm! x${streak} 🔥`, color: '#ff7ae0' };
+  }
+  return { label: `Ngoạm! +${points}`, color: '#ffe24b' };
+}
 
 /**
  * Top-level UI facade connecting the Snake-Clash-style BossBar, AbsorbedPower
@@ -42,10 +87,18 @@ export class GameUI {
   private readonly overlay: GameOverlay;
   private readonly popups: ScorePopups;
   private readonly toasts: AchievementToast;
+  private readonly fairySkills: FairySkillButtons;
 
   private lastPhase: GamePhase | '' = '';
   private bestAtRunStart = 0;
   private wasControllerConnected = false;
+  private lastButterflyKey = '';
+  private lastEffectsKey = '';
+  private lastFrostPopupMs = -Infinity;
+  private readonly flashTimers = new Map<
+    HTMLElement,
+    { readonly cls: string; readonly timer: ReturnType<typeof setTimeout> }
+  >();
 
   constructor(uiRoot: HTMLElement, callbacks: GameUICallbacks, initialSettings: InitialUISettings) {
     this.shellEl = el('div', { className: 'magic-ui-shell' });
@@ -80,7 +133,7 @@ export class GameUI {
 
     this.bossBar = new BossBar(this.topStackEl);
     this.absorbedPower = new AbsorbedPowerBanner(this.topStackEl);
-    this.questBanner = new QuestBanner(this.topStackEl);
+    this.questBanner = new QuestBanner(this.topStackEl, callbacks);
     this.leaderboard = new LeaderboardPanel(this.hud.getRightDock());
     this.boosters = new BoosterButtons(this.shellEl, callbacks);
     this.crownArrow = new CrownRadarArrow(this.shellEl);
@@ -95,6 +148,7 @@ export class GameUI {
 
     this.popups = new ScorePopups(uiRoot);
     this.toasts = new AchievementToast(uiRoot);
+    this.fairySkills = new FairySkillButtons(this.shellEl, callbacks);
   }
 
   getSelectedMode(): GameMode {
@@ -109,6 +163,14 @@ export class GameUI {
     return this.overlay.getSelectedPlayerName();
   }
 
+  getSelectedAgeProfile(): AgeProfile {
+    return this.overlay.getSelectedAgeProfile();
+  }
+
+  getOverlay(): GameOverlay {
+    return this.overlay;
+  }
+
   syncState(state: GameState): void {
     this.hud.syncState(state);
     this.bossBar.syncState(state);
@@ -118,6 +180,33 @@ export class GameUI {
     this.boosters.syncState(state);
     this.crownArrow.syncState(state);
     this.magicBar.syncState(state);
+    this.fairySkills.syncState(state);
+
+    const isFlying = state.butterflyStage === 'butterfly' && state.phase === 'playing';
+    const isSpraying = state.sprayActiveTicks > 0 && state.phase === 'playing';
+    const effectsKey = `${isFlying ? 1 : 0}/${isSpraying ? 1 : 0}`;
+    if (effectsKey !== this.lastEffectsKey) {
+      this.lastEffectsKey = effectsKey;
+      this.shellEl.classList.toggle('butterfly-flying', isFlying);
+      this.shellEl.classList.toggle('spraying', isSpraying);
+      const fairyDock = this.shellEl.querySelector<HTMLElement>('#fairy-skills');
+      fairyDock?.classList.toggle('butterfly-flying', isFlying);
+    }
+
+    const butterflyKey = `${state.butterflyStage}/${state.butterflyCharge >= 100 ? 1 : 0}`;
+    if (butterflyKey !== this.lastButterflyKey) {
+      this.lastButterflyKey = butterflyKey;
+      const butterflyBtn = this.shellEl.querySelector<HTMLElement>(
+        '#fairy-skills [data-skill="butterfly"]',
+      );
+      if (butterflyBtn) {
+        butterflyBtn.classList.toggle(
+          'is-butterfly-ready',
+          state.butterflyStage === 'caterpillar' && state.butterflyCharge >= 100,
+        );
+        butterflyBtn.classList.toggle('is-cocoon', state.butterflyStage === 'cocoon');
+      }
+    }
 
     if (state.phase !== this.lastPhase) {
       if (
@@ -216,11 +305,8 @@ export class GameUI {
           this.showToast('Mẹo phép thuật!', event.messageVi, '🔮');
         }
         if (screenPos) {
-          if (event.form === 'phoenix') {
-            this.popups.spawn(screenPos.x, screenPos.y, '❄️ Băng Giá!', '#38f6ff');
-          } else {
-            this.popups.spawn(screenPos.x, screenPos.y, '💥 Trúng!', '#ffd447');
-          }
+          const style = SPRAY_HIT_POPUP[event.form ?? state.form];
+          this.popups.spawn(screenPos.x, screenPos.y, style.label, style.color);
         }
         break;
       }
@@ -237,12 +323,18 @@ export class GameUI {
 
       case 'bot_hit': {
         if (screenPos) {
-          this.popups.spawn(
-            screenPos.x,
-            screenPos.y,
-            event.messageVi ?? '💥 Hạ cấp Bot!',
-            '#ff9f43',
-          );
+          const style = SPRAY_HIT_POPUP[event.form ?? state.form];
+          this.popups.spawn(screenPos.x, screenPos.y, style.label, style.color);
+        }
+        break;
+      }
+
+      case 'bot_chomp': {
+        if (screenPos !== null) {
+          const streak = Math.max(1, event.chompStreak ?? state.chompStreak);
+          const pts = event.points ?? 12;
+          const { label, color } = chompPopupStyle(streak, pts);
+          this.popups.spawnChomp(screenPos.x, screenPos.y, label, color, streak);
         }
         break;
       }
@@ -250,7 +342,12 @@ export class GameUI {
       case 'bot_eaten': {
         const color = FORM_METADATA[event.form ?? state.form].cssColor;
         if (screenPos) {
-          this.popups.spawn(screenPos.x, screenPos.y, `🐍 Chén gọn! +${event.points ?? 80}`, color);
+          this.popups.spawnCelebration(
+            screenPos.x,
+            screenPos.y,
+            `🐍 Chén gọn! +${event.points ?? 80}`,
+            color,
+          );
         }
         this.showToast(
           'Hấp thụ sức mạnh Bot!',
@@ -264,29 +361,27 @@ export class GameUI {
         if (screenPos) {
           this.popups.spawn(screenPos.x, screenPos.y, '⚠️ Rắn mạnh hơn!', '#ff6b8b');
         }
-        this.showToast(
-          'Cẩn thận Bot cấp cao!',
-          event.messageVi ?? 'Rắn mạnh hơn! Bắn đạn giảm cấp nó trước nhé!',
-          '⚠️',
-        );
+        const strongBotTip = (
+          event.messageVi ?? 'Rắn mạnh hơn! Giữ Space/R2 phun phép giảm cấp nó trước nhé!'
+        ).replace('Bắn đạn', 'Giữ Space/R2 phun phép');
+        this.showToast('Cẩn thận Bot cấp cao!', strongBotTip, '⚠️');
         break;
       }
 
       case 'boss_spawn': {
         if (screenPos) {
-          this.popups.spawn(screenPos.x, screenPos.y, '👹 BOSS XUẤT HIỆN!', '#ff5252');
+          this.popups.spawnCelebration(screenPos.x, screenPos.y, '👹 BOSS XUẤT HIỆN!', '#ff5252');
         }
-        this.showToast(
-          '👹 ĐẠI VƯƠNG RỒNG XUẤT HIỆN!',
-          event.messageVi ?? 'Bắn đạn giảm cấp Boss rồi nuốt chửng nhé!',
-          '👹',
-        );
+        const bossTip = event.messageVi
+          ? `${event.messageVi} Giữ Space/R2 phun phép giảm cấp Boss nhé!`
+          : 'Giữ Space/R2 phun Lửa/Băng/Nước/Tơ giảm cấp Boss rồi nuốt chửng nhé!';
+        this.showToast('👹 ĐẠI VƯƠNG RỒNG XUẤT HIỆN!', bossTip, '👹');
         break;
       }
 
       case 'boss_defeated': {
         if (screenPos) {
-          this.popups.spawn(
+          this.popups.spawnCelebration(
             screenPos.x,
             screenPos.y,
             `👑 HẠ BOSS +${event.points ?? 500}!`,
@@ -303,7 +398,7 @@ export class GameUI {
 
       case 'booster_activate': {
         if (screenPos) {
-          this.popups.spawn(
+          this.popups.spawnCelebration(
             screenPos.x,
             screenPos.y,
             event.messageVi ?? '⚡ Siêu Năng Lượng!',
@@ -320,16 +415,21 @@ export class GameUI {
 
       case 'quest_spawn': {
         this.showToast(
-          'Nhiệm vụ thông minh mới!',
+          '🔍 Nhiệm Vụ Mới!',
           event.messageVi ?? state.quest?.promptVi ?? '',
-          '🧠',
+          state.quest?.iconEmoji ?? '🧠',
         );
         break;
       }
 
       case 'quest_progress': {
         if (screenPos) {
-          this.popups.spawn(screenPos.x, screenPos.y, `⭐ +${event.points ?? 20}!`, '#4dff9a');
+          this.popups.spawnCelebration(
+            screenPos.x,
+            screenPos.y,
+            event.messageVi ? `${event.messageVi} ⭐` : `⭐ +${event.points ?? 20}!`,
+            '#4dff9a',
+          );
         }
         break;
       }
@@ -338,12 +438,12 @@ export class GameUI {
         const pts = event.points ?? 100;
         const lvlLabel = event.messageVi?.match(/\+\d+\s*Cấp/)?.[0] ?? '+10 Cấp';
         if (screenPos) {
-          this.popups.spawn(screenPos.x, screenPos.y, `Giải Đố ${lvlLabel}!`, '#4dff9a');
+          this.popups.spawnCelebration(screenPos.x, screenPos.y, `🎉 ${lvlLabel}!`, '#4dff9a');
         }
         this.showToast(
-          'Tuyệt vời! Bé giải đúng rồi!',
-          event.messageVi ?? `${lvlLabel} & +${pts} điểm thưởng 🌟`,
-          '🌟',
+          '🎉 Đúng Rồi!',
+          event.messageVi ?? `${lvlLabel} • +${pts}⭐`,
+          state.quest?.iconEmoji ?? '🌟',
         );
         break;
       }
@@ -351,7 +451,7 @@ export class GameUI {
       case 'quest_wrong': {
         this.questBanner.showHint(state.quest, event.messageVi);
         if (screenPos) {
-          this.popups.spawn(screenPos.x, screenPos.y, '💡 Thử viên khác nhé!', '#ffb3e6');
+          this.popups.spawn(screenPos.x, screenPos.y, '💡 Thử Lại!', '#ffb3e6');
         }
         break;
       }
@@ -370,7 +470,7 @@ export class GameUI {
 
       case 'heart_gained': {
         if (screenPos) {
-          this.popups.spawn(screenPos.x, screenPos.y, '❤️ +1 Tim!', '#ff5ec4');
+          this.popups.spawnCelebration(screenPos.x, screenPos.y, '❤️ +1 Tim!', '#ff5ec4');
         }
         this.showToast('Tim Phép Thuật!', event.messageVi ?? 'Thưởng +1 Tim phép thuật! 💖', '💖');
         break;
@@ -378,7 +478,12 @@ export class GameUI {
 
       case 'level_up': {
         if (screenPos) {
-          this.popups.spawn(screenPos.x, screenPos.y, `👑 Cấp ${state.level}!`, '#ffd447');
+          this.popups.spawnCelebration(
+            screenPos.x,
+            screenPos.y,
+            `👑 Cấp ${state.level}!`,
+            '#ffd447',
+          );
         }
         this.showToast(
           'Lên Cấp Mới!',
@@ -392,6 +497,138 @@ export class GameUI {
       case 'dash':
       case 'gameover':
         break;
+
+      case 'flower_bloom': {
+        if (screenPos) {
+          this.popups.spawnCelebration(screenPos.x, screenPos.y, '🌸 Nở Hoa!', '#ff7ac6');
+        }
+        break;
+      }
+
+      case 'flower_charm': {
+        if (screenPos) {
+          this.popups.spawnCelebration(screenPos.x, screenPos.y, '✨ Quyến Rũ!', '#ffd447');
+        }
+        break;
+      }
+
+      case 'cocoon_start': {
+        if (screenPos) {
+          this.popups.spawnCelebration(screenPos.x, screenPos.y, '🥚 Kén Pha Lê!', '#ff9de6');
+        }
+        this.showToast('Kén Pha Lê Bao Bọc!', 'Chuẩn bị hoá bướm tiên!', '🥚');
+        break;
+      }
+
+      case 'butterfly_emerge': {
+        this.lastFrostPopupMs = performance.now();
+        if (screenPos) {
+          this.popups.spawnCelebration(
+            screenPos.x,
+            screenPos.y,
+            '🦋 Bướm Hồng Băng Giá!',
+            '#ff6ec7',
+          );
+        }
+        this.showToast(
+          '🦋 Bướm Hồng Băng Giá!',
+          'Cánh bướm hồng tỏa sáng & thả mưa băng đóng băng mọi thứ!',
+          '🦋',
+        );
+        break;
+      }
+
+      case 'butterfly_frost': {
+        const now = performance.now();
+        if (screenPos && now - this.lastFrostPopupMs >= 1600) {
+          this.lastFrostPopupMs = now;
+          this.popups.spawnFrost(screenPos.x, screenPos.y, '❄️ Băng Rơi!');
+        }
+        break;
+      }
+
+      case 'sky_thunder': {
+        if (screenPos) {
+          this.popups.spawnCelebration(screenPos.x, screenPos.y, '⚡ Sấm Sét!', '#5cf6ff');
+        }
+        this.showToast('Sấm Sét Phép Thuật!', 'Tia chớp chiếu sáng bầu trời!', '⚡');
+        break;
+      }
+
+      case 'butterfly_land': {
+        if (screenPos) {
+          this.popups.spawnCelebration(screenPos.x, screenPos.y, '🦋 Đáp Xuống!', '#5cf6ff');
+        }
+        break;
+      }
+
+      case 'aoe_fire': {
+        if (screenPos) {
+          this.popups.spawnCelebration(screenPos.x, screenPos.y, '🔥 Phun Lửa AoE!', '#ff6e42');
+        }
+        this.showToast('Phun Lửa 360°!', 'Ngọn lửa rồng quét sạch xung quanh!', '🔥');
+        break;
+      }
+
+      case 'aoe_water': {
+        if (screenPos) {
+          this.popups.spawnCelebration(screenPos.x, screenPos.y, '🌊 Sóng Thần AoE!', '#1ee3ff');
+        }
+        this.showToast('Sóng Thần Thủy Triều!', 'Xoáy nước 360° cuốn trôi đối thủ!', '🌊');
+        break;
+      }
+
+      case 'aoe_arcane': {
+        if (screenPos) {
+          this.popups.spawnCelebration(screenPos.x, screenPos.y, '🔮 Ma Thuật AoE!', '#d96bff');
+        }
+        this.showToast('Bùng Nổ Ma Thuật!', 'Ánh sao siêu tân tinh tỏa sáng 360°!', '🔮');
+        break;
+      }
+    }
+  }
+
+  /** Trigger crisp HUD / DualSense button-press highlight feedback across controls. */
+  flashControlFeedback(kind: ControlFeedbackKind, detail?: string): void {
+    switch (kind) {
+      case 'steer':
+        this.hud.flashControllerPill('🕹️');
+        break;
+      case 'shoot':
+        this.magicBar.flashSpray(detail as SnakeForm | undefined);
+        this.hud.flashControllerPill('R2');
+        break;
+      case 'morph':
+        this.magicBar.flashForm(detail as SnakeForm | undefined);
+        this.hud.flashControllerPill('△');
+        break;
+      case 'dash':
+        this.magicBar.flashDash();
+        this.hud.flashControllerPill('✕');
+        break;
+      case 'shield':
+        this.magicBar.flashShield();
+        this.hud.flashShieldPill();
+        this.hud.flashControllerPill('○');
+        break;
+      case 'booster': {
+        const booster = detail as BoosterKind | undefined;
+        if (booster) {
+          this.flashSelector(`#booster-buttons [data-booster="${booster}"]`, 'just-triggered', 360);
+          this.hud.flashControllerPill(BOOSTER_PILL_MAP[booster]);
+        }
+        break;
+      }
+      case 'skill': {
+        const skill = detail as FairySkillKind | undefined;
+        if (skill) {
+          this.flashSelector(`#fairy-skills [data-skill="${skill}"]`, 'just-pressed', 340);
+          for (const pillLabel of SKILL_PILLS_MAP[skill]) {
+            this.hud.flashControllerPill(pillLabel);
+          }
+        }
+        break;
+      }
     }
   }
 
@@ -400,6 +637,10 @@ export class GameUI {
   }
 
   dispose(): void {
+    for (const entry of this.flashTimers.values()) {
+      clearTimeout(entry.timer);
+    }
+    this.flashTimers.clear();
     this.hud.dispose();
     this.bossBar.dispose();
     this.absorbedPower.dispose();
@@ -411,8 +652,27 @@ export class GameUI {
     this.overlay.dispose();
     this.popups.dispose();
     this.toasts.dispose();
+    this.fairySkills.dispose();
     this.topStackEl.remove();
     this.shellEl.remove();
+  }
+
+  private flashSelector(selector: string, className: string, durationMs: number): void {
+    const node = this.shellEl.querySelector<HTMLElement>(selector);
+    if (!node) return;
+    const prev = this.flashTimers.get(node);
+    if (prev) {
+      clearTimeout(prev.timer);
+      node.classList.remove(prev.cls);
+    }
+    node.classList.remove(className);
+    void node.offsetWidth;
+    node.classList.add(className);
+    const timer = setTimeout(() => {
+      node.classList.remove(className);
+      this.flashTimers.delete(node);
+    }, durationMs);
+    this.flashTimers.set(node, { cls: className, timer });
   }
 
   private applyTheme(theme: VisualTheme): void {

@@ -1,4 +1,4 @@
-import type { BoosterKind, Direction, SnakeForm } from '../core/types';
+import type { BoosterKind, Direction, FairySkillKind, SnakeForm } from '../core/types';
 
 /** Semantic control events, decoupled from the device that produced them. */
 export interface ControlHandlers {
@@ -24,6 +24,10 @@ export interface ControlHandlers {
   shield(): void;
   /** Activate a magical booster (`level`, `speed`, `magnet`). */
   activateBooster(booster: BoosterKind): void;
+  /** Cast a Fairy Magic skill (`flower`, `butterfly`, `thunder`). */
+  castFairySkill(skill: FairySkillKind): void;
+  /** Activate or release press-and-hold Pink Frost Butterfly transformation. */
+  setButterflyHold(active: boolean): void;
   /** Smooth 3D camera look offset (-1..1 on X/Y from Right Stick). */
   cameraLook(nx: number, ny: number): void;
 }

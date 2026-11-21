@@ -360,6 +360,9 @@ export class MagicalMusic {
   private form: SnakeForm = 'dragon';
   private phase: GamePhase = 'ready';
   private bossActive = false;
+  private butterflyActive = false;
+  private sprayActive = false;
+  private chompHot = false;
   private stepIndex = 0;
   private nextNoteTime = 0;
   private lastPadForm: SnakeForm | null = null;
@@ -393,6 +396,9 @@ export class MagicalMusic {
     this.form = state.form;
     this.phase = state.phase;
     this.bossActive = state.activeBossId !== null;
+    this.butterflyActive = state.butterflyStage === 'butterfly';
+    this.sprayActive = state.sprayActiveTicks > 0;
+    this.chompHot = state.chompStreak >= 2;
     this.applyGainForState();
     this.syncScheduler();
   }
@@ -402,14 +408,18 @@ export class MagicalMusic {
     this.updateState(state);
   }
 
-  /** Expose the desired gain level for the current enable flag, game phase, and boss state. */
+  /** Expose the desired gain level for the current enable flag, game phase, and dynamic energy state. */
   getTargetGain(): number {
     if (!this.enabled) return 0;
     const base = PHASE_GAIN[this.phase];
-    if (this.bossActive && this.phase === 'playing') {
-      return Math.min(0.42, base + 0.04);
-    }
-    return base;
+    if (this.phase !== 'playing') return base;
+
+    let lift = 0;
+    if (this.bossActive) lift += 0.04;
+    if (this.butterflyActive) lift += 0.024;
+    if (this.sprayActive) lift += 0.014;
+    if (this.chompHot) lift += 0.018;
+    return Math.min(0.42, Number((base + lift).toFixed(3)));
   }
 
   /** Immediately re-sync gain and lookahead scheduling once `AudioContext.resume()` completes. */
@@ -488,6 +498,8 @@ export class MagicalMusic {
     }
 
     const profile = FORM_PROFILES[this.form];
+    const hasEnergyLift =
+      this.phase === 'playing' && (this.butterflyActive || this.sprayActive || this.chompHot);
     while (this.nextNoteTime < ctx.currentTime + LOOKAHEAD_SEC) {
       this.scheduleStep(ctx, dest, profile, this.stepIndex, this.nextNoteTime);
       const paceMultiplier =
@@ -495,7 +507,9 @@ export class MagicalMusic {
           ? 1.15
           : this.bossActive && this.phase === 'playing'
             ? 0.84
-            : 1;
+            : hasEnergyLift
+              ? 0.94
+              : 1;
       this.nextNoteTime += profile.stepSec * paceMultiplier;
       this.stepIndex = (this.stepIndex + 1) % profile.melody.length;
     }
@@ -511,12 +525,16 @@ export class MagicalMusic {
     const barIndex = Math.floor(step / 8) % profile.chords.length;
     const stepInBar = step % 8;
     const chord = profile.chords[barIndex] ?? [48, 55, 62];
+    const calmPhase = this.phase === 'paused' || this.phase === 'gameover';
+    const bossUplift = this.bossActive && this.phase === 'playing';
+    const energyLift =
+      this.phase === 'playing' && (this.butterflyActive || this.sprayActive || this.chompHot);
 
-    // Refresh warm harmonic pad at each bar boundary or immediately after a form morph.
+    // Refresh warm harmonic pad + octave shimmer layer at each bar boundary or form morph.
     if (stepInBar === 0 || this.lastPadForm !== this.form) {
       this.lastPadForm = this.form;
       const padDuration = profile.stepSec * Math.max(2, 8 - stepInBar);
-      this.scheduleWarmPad(ctx, dest, chord, time, padDuration);
+      this.scheduleWarmPad(ctx, dest, chord, time, padDuration, energyLift || bossUplift);
       if (
         profile.hasWoodFlute &&
         stepInBar === 0 &&
@@ -524,10 +542,27 @@ export class MagicalMusic {
       ) {
         this.scheduleWoodFlute(ctx, dest, midiToHz(chord[2] + 12), time, profile.stepSec * 5.2);
       }
+      if (this.butterflyActive && this.phase === 'playing' && stepInBar === 0) {
+        this.scheduleOctavePadShimmer(
+          ctx,
+          dest,
+          midiToHz(chord[1] + 24),
+          time,
+          profile.stepSec * 4.6,
+          0.017,
+          -0.26,
+        );
+        this.scheduleOctavePadShimmer(
+          ctx,
+          dest,
+          midiToHz(chord[2] + 24),
+          time,
+          profile.stepSec * 4.6,
+          0.02,
+          0.26,
+        );
+      }
     }
-
-    const calmPhase = this.phase === 'paused' || this.phase === 'gameover';
-    const bossUplift = this.bossActive && this.phase === 'playing';
 
     // Gentle accompaniment pulse on beat 1 & 3 (or softly on step 0 & 4)
     if (
@@ -545,7 +580,23 @@ export class MagicalMusic {
       );
     }
 
-    // During an active Boss encounter, add a cheerful off-beat sparkle & warm bass pulse
+    // Subtle fairytale octave shimmer chime on beats 2 & 4
+    if (!calmPhase && (stepInBar === 2 || stepInBar === 6)) {
+      const shimmerTone = chord[(barIndex + (stepInBar === 2 ? 1 : 2)) % chord.length] ?? chord[2];
+      this.schedulePulseVoice(
+        ctx,
+        dest,
+        midiToHz(shimmerTone + 24),
+        time,
+        profile.stepSec * 1.35,
+        profile.timbre,
+        energyLift ? 0.022 : 0.015,
+        true,
+        stepInBar === 2 ? -0.32 : 0.32,
+      );
+    }
+
+    // Dynamic energy lift during Boss encounters OR butterfly / active spray / chomp streak
     if (bossUplift) {
       if (stepInBar === 0 || stepInBar === 4) {
         this.schedulePulseVoice(
@@ -570,6 +621,49 @@ export class MagicalMusic {
           0.028,
         );
       }
+    } else if (energyLift) {
+      if (stepInBar === 0 || stepInBar === 4) {
+        this.schedulePulseVoice(
+          ctx,
+          dest,
+          midiToHz(chord[0]),
+          time,
+          profile.stepSec * 1.3,
+          profile.timbre,
+          0.032,
+          true,
+        );
+      } else if (stepInBar % 2 === 1) {
+        const liftTone = chord[(stepInBar + 1) % chord.length] ?? chord[1];
+        this.schedulePulseVoice(
+          ctx,
+          dest,
+          midiToHz(liftTone + 24),
+          time,
+          profile.stepSec * 0.95,
+          profile.timbre,
+          0.02,
+          true,
+          stepInBar === 1 || stepInBar === 5 ? -0.28 : 0.28,
+        );
+      }
+    }
+
+    // Crystal butterfly sparkle bell layer on off-beats while soaring
+    if (this.butterflyActive && this.phase === 'playing' && stepInBar % 2 === 1) {
+      const crystalTone = chord[(barIndex + stepInBar) % chord.length] ?? chord[2];
+      this.playBellNote(
+        ctx,
+        dest,
+        midiToHz(crystalTone + 24),
+        time,
+        profile.stepSec * 1.45,
+        0.028,
+        3,
+        0.12,
+        1.4,
+        stepInBar === 1 || stepInBar === 5 ? -0.3 : 0.3,
+      );
     }
 
     // Main fairy-tale melody voice (sparser during paused/gameover so it feels peaceful)
@@ -586,6 +680,7 @@ export class MagicalMusic {
     chord: readonly [number, number, number],
     startTime: number,
     duration: number,
+    energized = false,
   ): void {
     const safeDur = Math.max(0.5, duration);
     const fadeIn = Math.min(0.45, safeDur * 0.3);
@@ -600,15 +695,15 @@ export class MagicalMusic {
       osc.frequency.setValueAtTime(midiToHz(midi), startTime);
 
       gain.gain.setValueAtTime(0.0001, startTime);
-      gain.gain.exponentialRampToValueAtTime(0.042, startTime + fadeIn);
-      gain.gain.setValueAtTime(0.042, startTime + safeDur * 0.72);
+      gain.gain.exponentialRampToValueAtTime(0.04, startTime + fadeIn);
+      gain.gain.setValueAtTime(0.04, startTime + safeDur * 0.72);
       gain.gain.exponentialRampToValueAtTime(0.0001, endTime);
 
       let tail: AudioNode = osc;
       if (typeof ctx.createBiquadFilter === 'function') {
         const filter = ctx.createBiquadFilter();
         filter.type = 'lowpass';
-        filter.frequency.setValueAtTime(680, startTime);
+        filter.frequency.setValueAtTime(energized ? 820 : 680, startTime);
         tail.connect(filter);
         tail = filter;
         cleanupNodes.push(filter);
@@ -618,6 +713,77 @@ export class MagicalMusic {
       gain.connect(dest);
       this.trackAndStop(osc, endTime + 0.02, cleanupNodes, startTime);
     }
+
+    // Soft octave shimmer pad layer (+12 semitones on root & fifth) for warm fairytale glow
+    const shimmerPeak = energized ? 0.02 : 0.013;
+    this.scheduleOctavePadShimmer(
+      ctx,
+      dest,
+      midiToHz(chord[1] + 12),
+      startTime,
+      safeDur,
+      shimmerPeak,
+      -0.22,
+    );
+    this.scheduleOctavePadShimmer(
+      ctx,
+      dest,
+      midiToHz(chord[2] + 12),
+      startTime,
+      safeDur,
+      shimmerPeak * 0.85,
+      0.22,
+    );
+  }
+
+  private scheduleOctavePadShimmer(
+    ctx: AudioContext,
+    dest: AudioNode,
+    hz: number,
+    startTime: number,
+    duration: number,
+    peakGain: number,
+    pan = 0,
+  ): void {
+    const safeDur = Math.max(0.4, duration);
+    const fadeIn = Math.min(0.5, safeDur * 0.35);
+    const endTime = startTime + safeDur + 0.35;
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const cleanupNodes: AudioNode[] = [osc, gain];
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(hz, startTime);
+
+    gain.gain.setValueAtTime(0.0001, startTime);
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.0005, peakGain), startTime + fadeIn);
+    gain.gain.setValueAtTime(Math.max(0.0005, peakGain), startTime + safeDur * 0.68);
+    gain.gain.exponentialRampToValueAtTime(0.0001, endTime);
+
+    let tail: AudioNode = osc;
+    if (typeof ctx.createBiquadFilter === 'function') {
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(1350, startTime);
+      tail.connect(filter);
+      tail = filter;
+      cleanupNodes.push(filter);
+    }
+
+    tail.connect(gain);
+
+    if (pan !== 0 && typeof ctx.createStereoPanner === 'function') {
+      const panner = ctx.createStereoPanner();
+      panner.pan.setValueAtTime(Math.max(-1, Math.min(1, pan)), startTime);
+      gain.connect(panner);
+      panner.connect(dest);
+      cleanupNodes.push(panner);
+    } else {
+      gain.connect(dest);
+    }
+
+    this.trackAndStop(osc, endTime + 0.02, cleanupNodes, startTime);
   }
 
   private schedulePulseVoice(
@@ -629,9 +795,11 @@ export class MagicalMusic {
     timbre: MusicTimbre,
     peakGain = 0.045,
     forceSine = false,
+    pan = 0,
   ): void {
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
+    const cleanupNodes: AudioNode[] = [osc, gain];
     const endTime = startTime + Math.max(0.18, duration);
 
     osc.type = !forceSine && timbre === 'harp' ? 'triangle' : 'sine';
@@ -642,8 +810,16 @@ export class MagicalMusic {
     gain.gain.exponentialRampToValueAtTime(0.0001, endTime);
 
     osc.connect(gain);
-    gain.connect(dest);
-    this.trackAndStop(osc, endTime + 0.02, [osc, gain], startTime);
+    if (pan !== 0 && typeof ctx.createStereoPanner === 'function') {
+      const panner = ctx.createStereoPanner();
+      panner.pan.setValueAtTime(Math.max(-1, Math.min(1, pan)), startTime);
+      gain.connect(panner);
+      panner.connect(dest);
+      cleanupNodes.push(panner);
+    } else {
+      gain.connect(dest);
+    }
+    this.trackAndStop(osc, endTime + 0.02, cleanupNodes, startTime);
   }
 
   private scheduleLeadVoice(
@@ -679,10 +855,12 @@ export class MagicalMusic {
     overtoneRatio: number,
     overtoneFactor: number,
     shimmerDetuneHz: number,
+    pan = 0,
   ): void {
     const endTime = startTime + duration;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
+    const cleanupNodes: AudioNode[] = [osc, gain];
     osc.type = 'sine';
     osc.frequency.setValueAtTime(hz, startTime);
 
@@ -690,9 +868,18 @@ export class MagicalMusic {
     gain.gain.exponentialRampToValueAtTime(peak, startTime + 0.008);
     gain.gain.exponentialRampToValueAtTime(0.0001, endTime);
 
+    let outputNode: AudioNode = dest;
+    if (pan !== 0 && typeof ctx.createStereoPanner === 'function') {
+      const panner = ctx.createStereoPanner();
+      panner.pan.setValueAtTime(Math.max(-1, Math.min(1, pan)), startTime);
+      panner.connect(dest);
+      outputNode = panner;
+      cleanupNodes.push(panner);
+    }
+
     osc.connect(gain);
-    gain.connect(dest);
-    this.trackAndStop(osc, endTime + 0.02, [osc, gain], startTime);
+    gain.connect(outputNode);
+    this.trackAndStop(osc, endTime + 0.02, cleanupNodes, startTime);
 
     // Subtle bell overtone
     const over = ctx.createOscillator();
@@ -708,7 +895,7 @@ export class MagicalMusic {
     overGain.gain.exponentialRampToValueAtTime(0.0001, overEnd);
 
     over.connect(overGain);
-    overGain.connect(dest);
+    overGain.connect(outputNode);
     this.trackAndStop(over, overEnd + 0.02, [over, overGain], startTime);
   }
 

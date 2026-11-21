@@ -15,24 +15,24 @@ import {
 } from '../../src/core/systems/arena';
 
 describe('arena', () => {
-  const config = DEFAULT_CONFIG; // worldRadius 56, maxGrid 112
+  const config = DEFAULT_CONFIG; // worldRadius 280, maxGrid 560
 
   it('computes active size from worldRadius and margin', () => {
-    expect(activeSize(config, 0)).toBe(112);
-    expect(activeSize(config, 4)).toBe(104);
+    expect(activeSize(config, 0)).toBe(560);
+    expect(activeSize(config, 4)).toBe(552);
   });
 
   it('computes symmetric world bounds centered at (0, 0)', () => {
-    expect(wallBounds(config, 0)).toEqual({ lo: -56, hi: 56 });
-    expect(innerBounds(config, 0)).toEqual({ lo: -55, hi: 55 });
-    expect(wallBounds(config, 2)).toEqual({ lo: -54, hi: 54 });
-    expect(innerBounds(config, 2)).toEqual({ lo: -53, hi: 53 });
+    expect(wallBounds(config, 0)).toEqual({ lo: -280, hi: 280 });
+    expect(innerBounds(config, 0)).toEqual({ lo: -279, hi: 279 });
+    expect(wallBounds(config, 2)).toEqual({ lo: -278, hi: 278 });
+    expect(innerBounds(config, 2)).toEqual({ lo: -277, hi: 277 });
   });
 
   it('wraps points cyclically and measures Euclidean/Chebyshev/Manhattan distances', () => {
-    const wrapped = wrapCell({ x: 57, z: -57 }, config, 0);
-    expect(wrapped.x).toBeCloseTo(-55, 6);
-    expect(wrapped.z).toBeCloseTo(55, 6);
+    const wrapped = wrapCell({ x: 281, z: -281 }, config, 0);
+    expect(wrapped.x).toBeCloseTo(-279, 6);
+    expect(wrapped.z).toBeCloseTo(279, 6);
     expect(euclideanDistance({ x: 0, z: 0 }, { x: 3, z: 4 })).toBe(5);
     expect(chebyshevDistance({ x: 5, z: 5 }, { x: 6, z: 4 })).toBe(1);
     expect(manhattanDistance({ x: 5, z: 5 }, { x: 6, z: 4 })).toBe(2);

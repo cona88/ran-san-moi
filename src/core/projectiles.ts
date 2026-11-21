@@ -1,5 +1,14 @@
-import type { BotSnake, Cell, GameState, Hazard, Projectile, SnakeForm, Vec2 } from './types';
-import { FORM_METADATA } from './config';
+import type {
+  BotSnake,
+  Cell,
+  GameState,
+  Hazard,
+  Projectile,
+  SilkWebZone,
+  SnakeForm,
+  Vec2,
+} from './types';
+import { FORM_METADATA, sprayKindForForm } from './config';
 import { nextFloat } from './rng';
 import { angleDiff, clamp, euclideanDistance, normalizeAngle } from './systems/arena';
 import { distancePointToSegment, hitsWall } from './systems/collision';
@@ -9,8 +18,14 @@ import { botCollisionRadius, computeLeaderboard, resolveBotDefeated } from './bo
 
 /** Continuous projectile travel distance per `projectile_step`. */
 export const PROJECTILE_STEP_DIST = 1.15;
-/** AoE blast radius for Spirit flower bombs. */
+/** AoE blast radius for Spirit silk web / flower bombs. */
 export const SPIRIT_EXPLOSION_RADIUS = 4.2;
+/** Duration in simulation ticks that the elemental spray stream remains visibly active after shooting. */
+export const SPRAY_ACTIVE_TICKS = 7;
+/** Lifetime in simulation ticks of a persistent SilkWebZone created by Spirit silk spray. */
+export const SILK_WEB_DURATION_TICKS = 90;
+/** Maximum number of active SilkWebZone areas retained at once. */
+export const MAX_SILK_WEBS = 10;
 
 const SHOOT_COOLDOWN_MS: Record<SnakeForm, number> = {
   dragon: 220,
@@ -32,13 +47,14 @@ export function shootCooldownForForm(form: SnakeForm, dragonRapidFire = false): 
   return dragonRapidFire ? Math.round(base * 0.5) : base;
 }
 
-/** Spawn continuous-angle projectiles for the snake's current form and `heading`. */
+/** Spawn continuous-angle elemental spray streams for the snake's current form and `heading`. */
 export function spawnProjectilesForForm(state: GameState, eventId: number): readonly Projectile[] {
   const head = state.snake[0];
   if (!head) return [];
 
   const baseId = eventId * 100;
   const heading = state.heading;
+  const sprayKind = sprayKindForForm(state.form);
 
   if (state.form === 'phoenix') {
     const offsets = [0, -0.28, 0.28];
@@ -53,12 +69,16 @@ export function spawnProjectilesForForm(state: GameState, eventId: number): read
         dx: Math.cos(a),
         dz: Math.sin(a),
         form: 'phoenix',
+        sprayKind,
         piercing: false,
         ttl: 18,
+        maxTtl: 18,
+        hitBotIds: undefined,
       };
     });
   }
 
+  const maxTtl = state.form === 'spirit' ? 10 : 24;
   return [
     {
       id: baseId + 1,
@@ -69,13 +89,16 @@ export function spawnProjectilesForForm(state: GameState, eventId: number): read
       dx: Math.cos(heading),
       dz: Math.sin(heading),
       form: state.form,
+      sprayKind,
       piercing: state.form === 'unicorn',
-      ttl: state.form === 'spirit' ? 10 : 24,
+      ttl: maxTtl,
+      maxTtl,
+      hitBotIds: state.form === 'unicorn' ? [] : undefined,
     },
   ];
 }
 
-/** Gently steer a Unicorn homing bolt toward the nearest nearby Bot or active Hazard. */
+/** Gently steer a Unicorn water stream toward the nearest unhit Bot or active Hazard. */
 function steerUnicorn(
   p: Projectile,
   bots: readonly BotSnake[],
@@ -83,8 +106,10 @@ function steerUnicorn(
 ): { dx: number; dz: number } {
   let targetPos: Vec2 | null = null;
   let bestDist = 14;
+  const alreadyHit = p.hitBotIds ? new Set(p.hitBotIds) : null;
 
   for (const b of bots) {
+    if (alreadyHit?.has(b.id)) continue;
     const vx = b.head.x - p.x;
     const vz = b.head.z - p.z;
     const dist = Math.hypot(vx, vz);
@@ -118,11 +143,42 @@ function steerUnicorn(
   return { dx: Math.cos(nextAngle), dz: Math.sin(nextAngle) };
 }
 
+/** Push a bot's head and every spine segment along `(dx, dz)` by `pushDist`, clamped within arena bounds. */
+export function pushBotAlongSpray(
+  bot: BotSnake,
+  dx: number,
+  dz: number,
+  pushDist: number,
+  worldRadius: number,
+): BotSnake {
+  const len = Math.hypot(dx, dz);
+  if (len <= 1e-6 || pushDist <= 0) {
+    return bot;
+  }
+  const bound = Math.max(2, worldRadius - 1.2);
+  const shiftX = (dx / len) * pushDist;
+  const shiftZ = (dz / len) * pushDist;
+  const shiftPoint = (p: Vec2): Vec2 => ({
+    x: clamp(p.x + shiftX, -bound, bound),
+    z: clamp(p.z + shiftZ, -bound, bound),
+  });
+
+  return {
+    ...bot,
+    head: shiftPoint(bot.head),
+    prevHead: bot.head,
+    spine: bot.spine.map(shiftPoint),
+    prevSpine: bot.spine,
+  };
+}
+
 function applyBotProjectileHit(
   state: GameState,
   botId: number,
   form: SnakeForm,
   hitPos: Vec2,
+  sprayDx = 0,
+  sprayDz = 0,
 ): GameState {
   const bot = state.bots.find((b) => b.id === botId);
   if (!bot) return state;
@@ -131,13 +187,55 @@ function applyBotProjectileHit(
   const remainingLevel = bot.level - dmg;
 
   if (remainingLevel <= 0) {
-    return resolveBotDefeated(state, bot, hitPos);
+    return resolveBotDefeated(state, { ...bot, level: bot.maxLevel ?? bot.level }, hitPos);
   }
 
-  const nextFrozen = form === 'phoenix' ? Math.max(bot.frozenTicks, 12) : bot.frozenTicks;
-  const bots = state.bots.map((b) =>
-    b.id === botId ? { ...b, level: remainingLevel, frozenTicks: nextFrozen } : b,
-  );
+  let updatedBot: BotSnake;
+  let messageVi: string;
+
+  switch (form) {
+    case 'dragon': {
+      const pushed = pushBotAlongSpray(bot, sprayDx, sprayDz, 0.85, state.config.worldRadius);
+      updatedBot = {
+        ...pushed,
+        level: remainingLevel,
+        chompedTicks: Math.max(bot.chompedTicks ?? 0, 12),
+      };
+      messageVi = `🔥 Thiêu ${bot.name}! Còn Lv.${remainingLevel}`;
+      break;
+    }
+    case 'phoenix': {
+      updatedBot = {
+        ...bot,
+        level: remainingLevel,
+        frozenTicks: Math.max(bot.frozenTicks, 24),
+      };
+      messageVi = `❄️ Đóng băng ${bot.name}! Còn Lv.${remainingLevel}`;
+      break;
+    }
+    case 'unicorn': {
+      const pushed = pushBotAlongSpray(bot, sprayDx, sprayDz, 1.15, state.config.worldRadius);
+      updatedBot = {
+        ...pushed,
+        level: remainingLevel,
+        chompedTicks: Math.max(bot.chompedTicks ?? 0, 14),
+      };
+      messageVi = `🌊 Xối nước ${bot.name}! Còn Lv.${remainingLevel}`;
+      break;
+    }
+    case 'spirit': {
+      updatedBot = {
+        ...bot,
+        level: remainingLevel,
+        frozenTicks: Math.max(bot.frozenTicks, 26),
+        chompedTicks: Math.max(bot.chompedTicks ?? 0, 16),
+      };
+      messageVi = `🕸️ Trói tơ ${bot.name}! Còn Lv.${remainingLevel}`;
+      break;
+    }
+  }
+
+  const bots = state.bots.map((b) => (b.id === botId ? updatedBot : b));
   const points = 15;
   const ev = appendEvents(state.events, state.eventSeq, [
     {
@@ -145,7 +243,7 @@ function applyBotProjectileHit(
       cell: hitPos,
       form,
       points,
-      messageVi: `Trúng ${bot.name}! Còn Lv.${remainingLevel} 💥`,
+      messageVi,
     },
   ]);
   const scored = applyScoreGain({
@@ -235,7 +333,8 @@ function applyHazardHit(state: GameState, hazardId: number, form: SnakeForm): Ga
     };
   }
 
-  const nextFrozen = form === 'phoenix' ? 16 : target.frozenTicks;
+  const nextFrozen =
+    form === 'phoenix' || form === 'spirit' ? Math.max(target.frozenTicks, 24) : target.frozenTicks;
   const hazards = state.hazards.map((h) =>
     h.id === hazardId ? { ...h, hp: remainingHp, frozenTicks: nextFrozen } : h,
   );
@@ -295,7 +394,7 @@ function detonateSpirit(state: GameState, center: Cell): GameState {
         points: pts,
       });
     } else {
-      surviving.push({ ...h, hp });
+      surviving.push({ ...h, hp, frozenTicks: Math.max(h.frozenTicks, 24) });
       drafts.push({
         kind: 'hazard_hit',
         cell: h.cell,
@@ -340,8 +439,23 @@ function detonateSpirit(state: GameState, center: Cell): GameState {
     b.spine.some((seg) => euclideanDistance(seg, center) <= SPIRIT_EXPLOSION_RADIUS),
   );
   for (const bot of botsInBlast) {
-    nextState = applyBotProjectileHit(nextState, bot.id, 'spirit', center);
+    nextState = applyBotProjectileHit(nextState, bot.id, 'spirit', center, 0, 0);
   }
+
+  // Leave a persistent sticky silk web zone at `center` (capped to newest MAX_SILK_WEBS)
+  const nextWebId = Math.max(0, ...nextState.silkWebs.map((w) => w.id)) + 1;
+  const newWeb: SilkWebZone = {
+    id: nextWebId,
+    x: center.x,
+    z: center.z,
+    radius: SPIRIT_EXPLOSION_RADIUS,
+    ticksRemaining: SILK_WEB_DURATION_TICKS,
+    maxTicks: SILK_WEB_DURATION_TICKS,
+  };
+  nextState = {
+    ...nextState,
+    silkWebs: [...nextState.silkWebs, newWeb].slice(-MAX_SILK_WEBS),
+  };
 
   // Spirit bloom has a chance to sprout bonusFood nearby
   if (nextState.bonusFood === null) {
@@ -368,6 +482,40 @@ function detonateSpirit(state: GameState, center: Cell): GameState {
   }
 
   return nextState;
+}
+
+/**
+ * Advance persistent silk web zones: decrement `ticksRemaining` (dropping expired webs `<= 0`)
+ * and apply sticky silk slow (`chompedTicks >= 8`) to bots whose head is inside a web.
+ */
+export function stepSilkWebs(state: GameState): GameState {
+  if (state.silkWebs.length === 0) return state;
+
+  const nextWebs = state.silkWebs
+    .map((w) => ({ ...w, ticksRemaining: w.ticksRemaining - 1 }))
+    .filter((w) => w.ticksRemaining > 0);
+
+  if (nextWebs.length === 0 || state.bots.length === 0) {
+    return { ...state, silkWebs: nextWebs };
+  }
+
+  let botsChanged = false;
+  const nextBots = state.bots.map((bot) => {
+    const insideWeb = nextWebs.some(
+      (web) => Math.hypot(bot.head.x - web.x, bot.head.z - web.z) <= web.radius,
+    );
+    if (!insideWeb) return bot;
+    const nextChomped = Math.max(bot.chompedTicks ?? 0, 8);
+    if (nextChomped === bot.chompedTicks) return bot;
+    botsChanged = true;
+    return { ...bot, chompedTicks: nextChomped };
+  });
+
+  return {
+    ...state,
+    silkWebs: nextWebs,
+    bots: botsChanged ? nextBots : state.bots,
+  };
 }
 
 /** Advance all active projectiles by `1.15` units along their direction and decrement `shootCooldownMs`. */
@@ -405,20 +553,18 @@ export function stepProjectiles(state: GameState, dtMs = 55): GameState {
       continue;
     }
 
-    // Check Bot hits (for piercing bolts, require entry from outside radius so 1 shot doesn't double-tap the same segment)
+    // Check Bot hits (for piercing water streams, skip bots already recorded in `hitBotIds` so knockback never double-hits)
     const hitBot = working.bots.find((b) => {
+      if (p.piercing && (p.hitBotIds?.includes(b.id) ?? false)) return false;
       const r = botCollisionRadius(b.level, b.isBoss) * 0.95;
-      const entered = b.spine.some((seg) => distancePointToSegment(seg, prevPos, nextPos) <= r);
-      if (!entered) return false;
-      if (!p.piercing) return true;
-      return b.spine.every((seg) => euclideanDistance(seg, prevPos) > r);
+      return b.spine.some((seg) => distancePointToSegment(seg, prevPos, nextPos) <= r);
     });
     if (hitBot) {
       if (p.form === 'spirit') {
         working = detonateSpirit(working, nextPos);
         continue;
       }
-      working = applyBotProjectileHit(working, hitBot.id, p.form, nextPos);
+      working = applyBotProjectileHit(working, hitBot.id, p.form, nextPos, steered.dx, steered.dz);
       if (p.piercing && ttl > 0) {
         survivingProjectiles.push({
           ...p,
@@ -429,6 +575,7 @@ export function stepProjectiles(state: GameState, dtMs = 55): GameState {
           dx: steered.dx,
           dz: steered.dz,
           ttl,
+          hitBotIds: [...(p.hitBotIds ?? []), hitBot.id],
         });
       }
       continue;
@@ -463,8 +610,9 @@ export function stepProjectiles(state: GameState, dtMs = 55): GameState {
     }
 
     // Check QuestOrb hits
+    const questHitRadius = state.ageProfile === 'age6' ? 1.45 : 1.2;
     const hitOrb = working.quest?.orbs.find(
-      (o) => !o.collected && distancePointToSegment(o.cell, prevPos, nextPos) <= 1.25,
+      (o) => !o.collected && distancePointToSegment(o.cell, prevPos, nextPos) <= questHitRadius,
     );
     if (hitOrb) {
       working = applyQuestOrbHit(working, hitOrb.id);

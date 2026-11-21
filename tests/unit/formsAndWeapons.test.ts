@@ -1,16 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import {
   FORM_METADATA,
+  MAX_SILK_WEBS,
   PROJECTILE_STEP_DIST,
+  SILK_WEB_DURATION_TICKS,
   SNAKE_FORMS,
+  SPIRIT_EXPLOSION_RADIUS,
+  SPRAY_ACTIVE_TICKS,
+  absorbedPowerTitle,
   createInitialState,
   getMagnetRadius,
   reduce,
+  sprayKindForForm,
+  stepSilkWebs,
   type BotSnake,
   type GameState,
   type Hazard,
   type WorldOrb,
 } from '../../src/core';
+import { pushBotAlongSpray } from '../../src/core/projectiles';
 
 function startPlaying(opts?: Parameters<typeof createInitialState>[0]): GameState {
   return reduce(createInitialState(opts), { type: 'start' });
@@ -250,5 +258,262 @@ describe('4 magical continuous weapons and projectile_step', () => {
     s = reduce(s, { type: 'projectile_step' });
     expect(s.hazards).toHaveLength(0);
     expect(s.score).toBe(scoreBefore + 50);
+  });
+});
+
+describe('Elemental spray powers, knockback, and SilkWebZone', () => {
+  it('maps sprayKindForForm, FORM_METADATA elemental spray copy, and absorbedPowerTitle', () => {
+    expect(sprayKindForForm('dragon')).toBe('fire');
+    expect(sprayKindForForm('phoenix')).toBe('ice');
+    expect(sprayKindForForm('unicorn')).toBe('water');
+    expect(sprayKindForForm('spirit')).toBe('silk');
+
+    for (const form of SNAKE_FORMS) {
+      expect(FORM_METADATA[form].sprayKind).toBe(sprayKindForForm(form));
+    }
+
+    expect(FORM_METADATA.dragon.nameVi).toBe('🌸 Rồng Tinh Tú');
+    expect(FORM_METADATA.dragon.weaponNameVi).toBe('🔥 Phun Lửa Rồng');
+    expect(FORM_METADATA.phoenix.nameVi).toBe('🦋 Phượng Hoàng Băng');
+    expect(FORM_METADATA.phoenix.weaponNameVi).toBe('❄️ Phun Băng Giá');
+    expect(FORM_METADATA.unicorn.nameVi).toBe('⚡ Kỳ Lân Ánh Sáng');
+    expect(FORM_METADATA.unicorn.weaponNameVi).toBe('🌊 Phun Nước Xoáy');
+    expect(FORM_METADATA.spirit.nameVi).toBe('🍀 Tinh Linh Rừng Xanh');
+    expect(FORM_METADATA.spirit.weaponNameVi).toBe('🕸️ Phun Tơ Phép');
+
+    expect(absorbedPowerTitle('dragon')).toBe('Hấp thụ: Phun Lửa Siêu Tốc x2 🌸');
+    expect(absorbedPowerTitle('unicorn')).toBe('Hấp thụ: Siêu Nam Châm ⚡');
+  });
+
+  it('activates sprayActiveTicks on shoot, sets maxTtl/sprayKind, and decays on tick', () => {
+    let s = startPlaying({ seed: 1 });
+    expect(s.sprayActiveTicks).toBe(0);
+    expect(s.silkWebs).toEqual([]);
+
+    s = { ...s, bots: [], hazards: [] };
+    s = reduce(s, { type: 'shoot' });
+    expect(s.sprayActiveTicks).toBe(SPRAY_ACTIVE_TICKS);
+    expect(s.projectiles[0]!.sprayKind).toBe('fire');
+    expect(s.projectiles[0]!.maxTtl).toBe(24);
+    expect(s.projectiles[0]!.hitBotIds).toBeUndefined();
+
+    for (let i = 0; i < SPRAY_ACTIVE_TICKS - 1; i++) {
+      s = reduce(s, { type: 'tick' });
+    }
+    expect(s.sprayActiveTicks).toBe(1);
+
+    s = reduce(s, { type: 'tick' });
+    expect(s.sprayActiveTicks).toBe(0);
+    s = reduce(s, { type: 'tick' });
+    expect(s.sprayActiveTicks).toBe(0);
+
+    // Check phoenix / unicorn / spirit projectile metadata
+    s = reduce(s, { type: 'morph', form: 'phoenix' });
+    s = { ...s, shootCooldownMs: 0 };
+    s = reduce(s, { type: 'shoot' });
+    const iceRays = s.projectiles.filter((p) => p.form === 'phoenix');
+    expect(iceRays).toHaveLength(3);
+    for (const ray of iceRays) {
+      expect(ray.sprayKind).toBe('ice');
+      expect(ray.maxTtl).toBe(18);
+      expect(ray.hitBotIds).toBeUndefined();
+    }
+
+    s = reduce(s, { type: 'morph', form: 'unicorn' });
+    s = { ...s, shootCooldownMs: 0, projectiles: [] };
+    s = reduce(s, { type: 'shoot' });
+    expect(s.projectiles[0]!.sprayKind).toBe('water');
+    expect(s.projectiles[0]!.maxTtl).toBe(24);
+    expect(s.projectiles[0]!.hitBotIds).toEqual([]);
+
+    s = reduce(s, { type: 'morph', form: 'spirit' });
+    s = { ...s, shootCooldownMs: 0, projectiles: [] };
+    s = reduce(s, { type: 'shoot' });
+    expect(s.projectiles[0]!.sprayKind).toBe('silk');
+    expect(s.projectiles[0]!.maxTtl).toBe(10);
+    expect(s.projectiles[0]!.hitBotIds).toBeUndefined();
+  });
+
+  it('pushes and slows surviving bots on Dragon fire hit and clamps within arena bounds', () => {
+    let s = startPlaying({ seed: 1 });
+    const bot = makeBot({
+      id: 901,
+      name: 'FireTarget',
+      level: 10,
+      head: { x: 3.3, z: 0 },
+      spine: [
+        { x: 3.3, z: 0 },
+        { x: 2.8, z: 0 },
+        { x: 2.3, z: 0 },
+      ],
+    });
+    s = { ...s, bots: [bot], hazards: [] };
+
+    s = reduce(s, { type: 'shoot' });
+    s = reduce(s, { type: 'projectile_step' }); // 1.15
+    s = reduce(s, { type: 'projectile_step' }); // 2.30 -> hits bot
+
+    const hitBot = s.bots.find((b) => b.id === 901)!;
+    expect(hitBot.level).toBe(6); // 10 - 4
+    expect(hitBot.chompedTicks).toBeGreaterThanOrEqual(12);
+    expect(hitBot.head.x).toBeCloseTo(3.3 + 0.85, 4);
+    expect(hitBot.spine[1]!.x).toBeCloseTo(2.8 + 0.85, 4);
+    expect(hitBot.spine[2]!.x).toBeCloseTo(2.3 + 0.85, 4);
+    expect(hitBot.prevHead).toEqual(bot.head);
+    expect(hitBot.prevSpine).toHaveLength(hitBot.spine.length);
+    expect(
+      s.events.some((e) => e.kind === 'bot_hit' && e.messageVi === '🔥 Thiêu FireTarget! Còn Lv.6'),
+    ).toBe(true);
+
+    // Boundary clamping check for pushBotAlongSpray
+    const edgeBot = makeBot({
+      id: 902,
+      head: { x: 54.5, z: 0 },
+      spine: [{ x: 54.5, z: 0 }],
+    });
+    const pushed = pushBotAlongSpray(edgeBot, 1, 0, 1.5, 56);
+    expect(pushed.head.x).toBeCloseTo(54.8, 5);
+    expect(pushed.spine[0]!.x).toBeCloseTo(54.8, 5);
+  });
+
+  it('deep-freezes bots and hazards (frozenTicks >= 24) on Phoenix ice 3-stream hit', () => {
+    let s = startPlaying({ seed: 1 });
+    s = reduce(s, { type: 'morph', form: 'phoenix' });
+    const bot = makeBot({
+      id: 910,
+      name: 'IceTarget',
+      level: 8,
+      head: { x: 3.4, z: 0 },
+      spine: [{ x: 3.4, z: 0 }],
+    });
+    const hazard = makeHazard({ id: 911, cell: { x: 3.4, z: 1.0 }, hp: 3 });
+    s = { ...s, bots: [bot], hazards: [hazard] };
+
+    s = reduce(s, { type: 'shoot' });
+    s = reduce(s, { type: 'projectile_step' }); // 1.15
+    s = reduce(s, { type: 'projectile_step' }); // 2.30
+    s = reduce(s, { type: 'projectile_step' }); // 3.45 -> center hits bot, side hits hazard
+
+    const frozenBot = s.bots.find((b) => b.id === 910)!;
+    expect(frozenBot.level).toBe(6);
+    expect(frozenBot.frozenTicks).toBeGreaterThanOrEqual(24);
+    expect(s.hazards.find((h) => h.id === 911)!.frozenTicks).toBeGreaterThanOrEqual(24);
+    expect(
+      s.events.some(
+        (e) => e.kind === 'bot_hit' && e.messageVi === '❄️ Đóng băng IceTarget! Còn Lv.6',
+      ),
+    ).toBe(true);
+  });
+
+  it('pushes on Unicorn water piercing stream and prevents double-hits via hitBotIds', () => {
+    let s = startPlaying({ seed: 1 });
+    s = reduce(s, { type: 'morph', form: 'unicorn' });
+
+    // Bot1 directly ahead; after 1.15 push it lands right in front of the piercing stream's next step.
+    const bot1 = makeBot({
+      id: 920,
+      name: 'WaterBot1',
+      level: 8,
+      head: { x: 2.0, z: 0 },
+      spine: [{ x: 2.0, z: 0 }],
+    });
+    const bot2 = makeBot({
+      id: 921,
+      name: 'WaterBot2',
+      level: 7,
+      head: { x: 5.5, z: 0 },
+      spine: [{ x: 5.5, z: 0 }],
+    });
+    s = { ...s, bots: [bot1, bot2], hazards: [] };
+
+    s = reduce(s, { type: 'shoot' });
+    for (let i = 0; i < 6; i++) {
+      s = reduce(s, { type: 'projectile_step' });
+    }
+
+    const after1 = s.bots.find((b) => b.id === 920)!;
+    const after2 = s.bots.find((b) => b.id === 921)!;
+    // Each bot hit exactly ONCE (-3 levels each), never double-tapped after knockback!
+    expect(after1.level).toBe(5);
+    expect(after1.chompedTicks).toBeGreaterThanOrEqual(14);
+    expect(after1.head.x).toBeCloseTo(2.0 + 1.15, 4);
+
+    expect(after2.level).toBe(4);
+    expect(after2.head.x).toBeCloseTo(5.5 + 1.15, 4);
+    expect(s.projectiles[0]!.hitBotIds).toEqual([920, 921]);
+  });
+
+  it('creates SilkWebZone on Spirit detonation, slows bots inside, caps at MAX_SILK_WEBS, and expires after SILK_WEB_DURATION_TICKS', () => {
+    let s = startPlaying({ seed: 7 });
+    s = reduce(s, { type: 'morph', form: 'spirit' });
+
+    const botInside = makeBot({
+      id: 930,
+      name: 'SilkBot',
+      level: 8,
+      head: { x: 3.0, z: 0 },
+      spine: [{ x: 3.0, z: 0 }],
+    });
+    const botOutside = makeBot({
+      id: 931,
+      name: 'FarBot',
+      level: 8,
+      head: { x: 25, z: 25 },
+      spine: [{ x: 25, z: 25 }],
+    });
+    const survivingHazard = makeHazard({ id: 932, cell: { x: 3.2, z: 1.0 }, hp: 5 });
+    s = { ...s, bots: [botInside, botOutside], hazards: [survivingHazard], bonusFood: null };
+
+    s = reduce(s, { type: 'shoot' });
+    s = reduce(s, { type: 'projectile_step' }); // 1.15
+    s = reduce(s, { type: 'projectile_step' }); // 2.30 -> hits botInside (radius check) & detonates
+
+    expect(s.silkWebs).toHaveLength(1);
+    const web = s.silkWebs[0]!;
+    expect(web.radius).toBe(SPIRIT_EXPLOSION_RADIUS);
+    expect(web.ticksRemaining).toBe(SILK_WEB_DURATION_TICKS);
+    expect(web.maxTicks).toBe(SILK_WEB_DURATION_TICKS);
+
+    // Surviving hazard & bot in blast get entangled
+    expect(s.hazards.find((h) => h.id === 932)!.frozenTicks).toBeGreaterThanOrEqual(24);
+    const tangledBot = s.bots.find((b) => b.id === 930)!;
+    expect(tangledBot.level).toBe(5);
+    expect(tangledBot.frozenTicks).toBeGreaterThanOrEqual(26);
+    expect(tangledBot.chompedTicks).toBeGreaterThanOrEqual(16);
+
+    // Clear chompedTicks on bots, then verify stepSilkWebs applies sticky slow (>= 8) inside web only
+    s = {
+      ...s,
+      bots: s.bots.map((b) => ({ ...b, chompedTicks: 0 })),
+    };
+    s = stepSilkWebs(s);
+    expect(s.silkWebs[0]!.ticksRemaining).toBe(SILK_WEB_DURATION_TICKS - 1);
+    expect(s.bots.find((b) => b.id === 930)!.chompedTicks).toBeGreaterThanOrEqual(8);
+    expect(s.bots.find((b) => b.id === 931)!.chompedTicks).toBe(0);
+
+    // Advance remaining SILK_WEB_DURATION_TICKS - 1 ticks via game ticks -> web expires cleanly
+    for (let i = 0; i < SILK_WEB_DURATION_TICKS - 2; i++) {
+      s = reduce(s, { type: 'tick' });
+    }
+    expect(s.silkWebs).toHaveLength(1);
+    expect(s.silkWebs[0]!.ticksRemaining).toBe(1);
+
+    s = reduce(s, { type: 'tick' });
+    expect(s.silkWebs).toHaveLength(0);
+
+    // Cap at MAX_SILK_WEBS (10) newest zones
+    let capped = startPlaying({ seed: 7 });
+    capped = reduce(capped, { type: 'morph', form: 'spirit' });
+    capped = { ...capped, bots: [], hazards: [] };
+    for (let i = 0; i < MAX_SILK_WEBS + 3; i++) {
+      capped = { ...capped, shootCooldownMs: 0 };
+      capped = reduce(capped, { type: 'shoot' });
+      for (let stepIdx = 0; stepIdx < 10; stepIdx++) {
+        capped = reduce(capped, { type: 'projectile_step' });
+      }
+    }
+    expect(capped.silkWebs).toHaveLength(MAX_SILK_WEBS);
+    expect(capped.silkWebs[0]!.id).toBe(4);
+    expect(capped.silkWebs[MAX_SILK_WEBS - 1]!.id).toBe(MAX_SILK_WEBS + 3);
   });
 });

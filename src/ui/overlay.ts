@@ -1,4 +1,4 @@
-import type { Difficulty, GameMode, GameState, VisualTheme } from '../core/types';
+import type { AgeProfile, Difficulty, GameMode, GameState, VisualTheme } from '../core/types';
 import type { ControllerStatus } from '../input/controls';
 import { el } from './dom';
 import {
@@ -10,20 +10,22 @@ import {
   type OptionMeta,
 } from './types';
 
-interface DualSenseGuideItem {
-  readonly buttons: string;
+interface ControlIconItem {
+  readonly icon: string;
   readonly action: string;
 }
 
-const DUALSENSE_MAP: readonly DualSenseGuideItem[] = [
-  { buttons: 'Left Stick / D-Pad', action: 'Lái 360° (WASD / Mũi tên)' },
-  { buttons: 'R2 / □', action: 'Bắn phép giảm cấp Bot (Space / J)' },
-  { buttons: '△ / R1 / L1', action: 'Biến hình 4 hệ (Q / E / 1-4)' },
-  { buttons: '✕ / L2', action: 'Lướt nhanh (Shift / K)' },
-  { buttons: '○', action: 'Khiên Bong Bóng (F / L)' },
-  { buttons: 'L3 / Create / R3', action: '3 Boosters: +10 Cấp (Z) • Tốc Độ (X) • Nam Châm (C)' },
-  { buttons: 'Right Stick', action: 'Nghiêng góc nhìn 3D' },
-  { buttons: 'Options', action: 'Tạm dừng (P / Esc)' },
+const CONTROL_ICONS: readonly ControlIconItem[] = [
+  { icon: '🕹️', action: 'Lái' },
+  { icon: 'R2', action: 'Phun🔥❄️' },
+  { icon: '△', action: 'Hệ' },
+  { icon: '○', action: 'Khiên' },
+  { icon: '✕', action: 'Lướt' },
+  { icon: 'L3/R3', action: 'Tăng' },
+  { icon: '□', action: 'Hoa🌸' },
+  { icon: 'R1', action: 'Bay/Đáp🦋' },
+  { icon: 'L1', action: 'Sét⚡' },
+  { icon: 'L2+Nút / Pad', action: 'AoE🔥🌊🔮' },
 ];
 
 const DEFAULT_PLAYER_NAME = 'Bé Tiên';
@@ -34,9 +36,7 @@ export interface OverlayThemeSync {
 
 /**
  * Full-viewport pastel glassmorphism overlay for `ready`, `paused`, and
- * `gameover` phases. Handles nickname input (`Biệt Danh Rắn Tiên`), mode,
- * difficulty, and 3D theme selection, Open-World Bot Hunt guide + DualSense
- * button map, and encouraging Vietnamese game-over stats.
+ * `gameover` phases. Now includes Age Profile Cards and minimal-text design.
  */
 export class GameOverlay {
   private readonly rootEl: HTMLElement;
@@ -49,6 +49,7 @@ export class GameOverlay {
   private readonly controllerLine: HTMLElement;
   private readonly huntTipEl: HTMLElement;
 
+  private readonly ageCardsRow: HTMLElement;
   private readonly nicknameRow: HTMLElement;
   private readonly playerNameInput: HTMLInputElement;
   private readonly setupSection: HTMLElement;
@@ -71,6 +72,7 @@ export class GameOverlay {
   private selectedMode: GameMode;
   private selectedDifficulty: Difficulty;
   private selectedTheme: VisualTheme;
+  private selectedAgeProfile: AgeProfile;
   private currentPhase: GameState['phase'] = 'ready';
   private stateMode: GameMode = 'adventure';
   private stateDifficulty: Difficulty = 'normal';
@@ -85,6 +87,7 @@ export class GameOverlay {
     this.selectedMode = initialSettings.mode;
     this.selectedDifficulty = initialSettings.difficulty;
     this.selectedTheme = initialSettings.theme;
+    this.selectedAgeProfile = initialSettings.ageProfile ?? 'age6';
 
     this.titleEl = el('h1', {
       className: 'overlay-title',
@@ -92,7 +95,7 @@ export class GameOverlay {
     });
     this.subtitleEl = el('p', {
       className: 'overlay-subtitle',
-      text: 'Thế Giới Mở Săn Bot 360° cùng tay cầm DualSense trên macOS',
+      text: 'Thế Giới Mở 5× (560×560) • Phiên 5 Phút Săn Bot 360° & DualSense',
     });
     this.praiseEl = el('p', { className: 'overlay-praise hidden' });
     this.eatenByBannerEl = el('p', { className: 'overlay-eaten-banner hidden' });
@@ -106,10 +109,41 @@ export class GameOverlay {
     });
     this.huntTipEl = el('div', {
       className: 'overlay-hunt-tip',
-      text: '⚔️ Ăn Bot Lv thấp hơn để cướp sức mạnh — Bắn đạn giảm cấp Bot Lv cao hơn!',
+      text: '⚔️ Ăn Bot Lv thấp → cướp phép! Phun Lửa/Băng/Nước/Tơ → trói & giảm cấp Bot mạnh!',
     });
 
-    // Cute compact Nickname input
+    // --- Age Profile Cards ---
+    const age6Card = el('button', {
+      className: 'age-profile-card',
+      type: 'button',
+      ariaLabel: '🐣 Bé 6 Tuổi — Chữ & Hình',
+    });
+    age6Card.dataset['ageProfile'] = 'age6';
+    age6Card.innerHTML =
+      '<span class="age-card-icon">🐣</span><span class="age-card-label">Bé 6 Tuổi</span><span class="age-card-sub">🔤 Chữ & Hình ➔ 🔮</span>';
+    age6Card.addEventListener('click', () => {
+      this.selectedAgeProfile = 'age6';
+      this.renderAgeCards();
+      this.callbacks.onSelectAgeProfile('age6');
+    });
+
+    const age9Card = el('button', {
+      className: 'age-profile-card',
+      type: 'button',
+      ariaLabel: '🚀 Bé 9 Tuổi — Ghép Từ & Phép',
+    });
+    age9Card.dataset['ageProfile'] = 'age9';
+    age9Card.innerHTML =
+      '<span class="age-card-icon">🚀</span><span class="age-card-label">Bé 9 Tuổi</span><span class="age-card-sub">📝 Ghép Từ & Phép ➔ ⚡</span>';
+    age9Card.addEventListener('click', () => {
+      this.selectedAgeProfile = 'age9';
+      this.renderAgeCards();
+      this.callbacks.onSelectAgeProfile('age9');
+    });
+
+    this.ageCardsRow = el('div', { className: 'age-cards-row' }, age6Card, age9Card);
+
+    // Nickname input + preset chips
     const initialName = initialSettings.playerName?.trim() || DEFAULT_PLAYER_NAME;
     this.playerNameInput = el('input', {
       id: 'player-name-input',
@@ -128,6 +162,26 @@ export class GameOverlay {
       }
     });
 
+    const chip6 = el('button', {
+      className: 'nickname-chip',
+      type: 'button',
+      text: '🐣 Bé 6T',
+      ariaLabel: 'Đặt biệt danh Bé 6T',
+    });
+    chip6.addEventListener('click', () => {
+      this.playerNameInput.value = 'Bé 6T';
+    });
+
+    const chip9 = el('button', {
+      className: 'nickname-chip',
+      type: 'button',
+      text: '🚀 Bé 9T',
+      ariaLabel: 'Đặt biệt danh Bé 9T',
+    });
+    chip9.addEventListener('click', () => {
+      this.playerNameInput.value = 'Bé 9T';
+    });
+
     this.nicknameRow = el(
       'div',
       { className: 'nickname-row' },
@@ -136,13 +190,15 @@ export class GameOverlay {
         text: '🏷️ Biệt Danh Rắn Tiên',
       }),
       this.playerNameInput,
+      chip6,
+      chip9,
     );
     const labelNode = this.nicknameRow.querySelector('label');
     if (labelNode) {
       labelNode.htmlFor = 'player-name-input';
     }
 
-    // Setup selectors (Mode, Difficulty, 3D Theme)
+    // Setup selectors (Mode, Difficulty, 3D Theme) — using shortLabelVi
     const modeRow = this.buildOptionGroup('Chế độ chơi', MODE_OPTIONS, this.modeButtons, (mode) => {
       this.selectedMode = mode;
       this.renderSelections();
@@ -176,23 +232,23 @@ export class GameOverlay {
       themeRow,
     );
 
-    // Visual DualSense control map
-    const guideGrid = el('div', { className: 'dualsense-map-grid' });
-    for (const item of DUALSENSE_MAP) {
-      guideGrid.appendChild(
+    // Compact icon-first visual control strip
+    const guideStrip = el('div', { className: 'control-icon-strip' });
+    for (const item of CONTROL_ICONS) {
+      guideStrip.appendChild(
         el(
-          'div',
-          { className: 'dualsense-map-item' },
-          el('span', { className: 'ds-keycap', text: item.buttons }),
-          el('span', { className: 'ds-action', text: item.action }),
+          'span',
+          { className: 'control-icon-item' },
+          el('span', { className: 'control-icon-key', text: item.icon }),
+          el('span', { className: 'control-icon-action', text: item.action }),
         ),
       );
     }
     this.guideSection = el(
       'div',
       { className: 'overlay-guide' },
-      el('div', { className: 'overlay-section-label', text: '🎮 Sơ đồ nút DualSense & Bàn phím' }),
-      guideGrid,
+      el('div', { className: 'overlay-section-label', text: '🎮 Điều khiển' }),
+      guideStrip,
     );
 
     // Game Over stats grid
@@ -203,10 +259,10 @@ export class GameOverlay {
     this.statsGrid = el(
       'div',
       { className: 'gameover-stats-grid hidden' },
-      this.makeStatCard('🏆 Hạng đạt được', this.rankValEl),
-      this.makeStatCard('👑 Cấp độ đạt được', this.levelValEl),
-      this.makeStatCard('🐍 Số Bot đã ăn', this.botsValEl),
-      this.makeStatCard('🧠 Câu đố đã giải', this.questsValEl),
+      this.makeStatCard('🏆 Hạng', this.rankValEl),
+      this.makeStatCard('👑 Cấp', this.levelValEl),
+      this.makeStatCard('🐍 Bot', this.botsValEl),
+      this.makeStatCard('🧠 Đố', this.questsValEl),
     );
     this.scoreSublineEl = el('div', { className: 'go-score-subline hidden', text: '' });
 
@@ -250,6 +306,7 @@ export class GameOverlay {
       this.eatenByBannerEl,
       this.statsGrid,
       this.scoreSublineEl,
+      this.ageCardsRow,
       this.controllerLine,
       this.huntTipEl,
       this.setupSection,
@@ -261,6 +318,7 @@ export class GameOverlay {
     this.rootEl = el('div', { id: 'overlay' }, this.cardEl);
     parent.appendChild(this.rootEl);
     this.renderSelections();
+    this.renderAgeCards();
   }
 
   getSelectedMode(): GameMode {
@@ -276,9 +334,18 @@ export class GameOverlay {
     return trimmed.length > 0 ? trimmed.slice(0, 16) : DEFAULT_PLAYER_NAME;
   }
 
+  getSelectedAgeProfile(): AgeProfile {
+    return this.selectedAgeProfile;
+  }
+
   setTheme(theme: VisualTheme): void {
     this.selectedTheme = theme;
     this.renderSelections();
+  }
+
+  setAgeProfile(ageProfile: AgeProfile): void {
+    this.selectedAgeProfile = ageProfile;
+    this.renderAgeCards();
   }
 
   syncController(status: ControllerStatus): void {
@@ -295,8 +362,9 @@ export class GameOverlay {
     this.currentPhase = 'ready';
     this.rootEl.dataset['mode'] = this.selectedMode;
     this.rootEl.dataset['difficulty'] = this.selectedDifficulty;
+    this.rootEl.dataset['ageProfile'] = this.selectedAgeProfile;
     this.titleEl.textContent = '✨ Vương Quốc Rắn Phép Thuật 3D';
-    this.subtitleEl.textContent = 'Thế Giới Mở Săn Bot 360° cùng tay cầm DualSense trên macOS';
+    this.subtitleEl.textContent = 'Thế Giới Mở Săn Bot 360° cùng DualSense trên macOS';
     this.subtitleEl.classList.remove('hidden');
     this.praiseEl.classList.add('hidden');
     this.eatenByBannerEl.classList.add('hidden');
@@ -305,6 +373,7 @@ export class GameOverlay {
     this.scoreSublineEl.classList.add('hidden');
     this.controllerLine.classList.remove('hidden');
     this.huntTipEl.classList.remove('hidden');
+    this.ageCardsRow.classList.remove('hidden');
     this.nicknameRow.classList.remove('hidden');
     this.setupSection.classList.remove('hidden');
     this.guideSection.classList.remove('hidden');
@@ -312,6 +381,7 @@ export class GameOverlay {
     this.primaryBtn.textContent = '✨ Bắt Đầu Phiêu Lưu!';
     this.ctaHintEl.textContent = 'Bấm ✕ trên DualSense hoặc Enter để bắt đầu ngay!';
     this.renderSelections();
+    this.renderAgeCards();
     this.rootEl.classList.remove('hidden');
   }
 
@@ -328,9 +398,10 @@ export class GameOverlay {
     this.scoreSublineEl.classList.add('hidden');
     this.controllerLine.classList.add('hidden');
     this.huntTipEl.classList.add('hidden');
+    this.ageCardsRow.classList.add('hidden');
     this.setupSection.classList.add('hidden');
     this.guideSection.classList.add('hidden');
-    this.praiseEl.textContent = `${state.playerName} đang ở Hạng #${state.playerRank} (Lv.${state.level} • 🐍 x${state.botsEaten}) — Nghỉ tay một chút nhé ✨`;
+    this.praiseEl.textContent = `${state.playerName} — Hạng #${state.playerRank} (Lv.${state.level} • 🐍 x${state.botsEaten}) ✨`;
     this.praiseEl.classList.remove('hidden');
     this.primaryBtn.textContent = '▶ Tiếp Tục Chơi (✕ / P)';
     this.secondaryBtn.textContent = '🔄 Chơi Lại Từ Đầu';
@@ -349,11 +420,10 @@ export class GameOverlay {
 
     if (state.won) {
       this.titleEl.textContent = '👑 Chiến Thắng Vương Quốc!';
-      this.praiseEl.textContent =
-        'Tuyệt đỉnh! Bé đã chinh phục toàn bộ đấu trường Vương Quốc Rắn Phép Thuật 3D!';
+      this.praiseEl.textContent = 'Bé đã hoàn thành 5 Phút Phiêu Lưu Phép Thuật tuyệt vời!';
     } else if (isNewBest) {
-      this.titleEl.textContent = '🌟 Kỷ Lục Mới Tuyệt Vời!';
-      this.praiseEl.textContent = 'Bé vừa vượt qua kỷ lục của chính mình đó — siêu xuất sắc!';
+      this.titleEl.textContent = '🌟 Kỷ Lục Mới!';
+      this.praiseEl.textContent = 'Bé vượt qua kỷ lục của mình — xuất sắc!';
     } else {
       this.titleEl.textContent = '🌈 Hành Trình Tuyệt Đẹp!';
       this.praiseEl.textContent = this.encouragingLine(state);
@@ -362,9 +432,9 @@ export class GameOverlay {
     if (state.eatenByBotName !== null) {
       this.eatenByBannerEl.textContent = '';
       this.eatenByBannerEl.append(
-        'Ôi! Bé vừa bị ',
+        'Bị ',
         el('strong', { text: state.eatenByBotName }),
-        ' nuốt mất rồi — Lần sau bắn đạn giảm cấp nó trước rồi xử đẹp nhé!',
+        ' nuốt! Phun phép giảm cấp trước nhé!',
       );
       this.eatenByBannerEl.classList.remove('hidden');
     } else {
@@ -373,21 +443,20 @@ export class GameOverlay {
 
     this.subtitleEl.classList.add('hidden');
     this.newBestBadge.classList.toggle('hidden', !isNewBest && !state.won);
-    this.newBestBadge.textContent = state.won
-      ? '👑 CHIẾN THẮNG TOÀN BỘ SÂN CHƠI! 👑'
-      : '★ KỶ LỤC MỚI CỦA BÉ! ★';
+    this.newBestBadge.textContent = state.won ? '👑 CHIẾN THẮNG TOÀN BỘ! 👑' : '★ KỶ LỤC MỚI! ★';
 
     this.rankValEl.textContent = `#${state.playerRank}`;
     this.levelValEl.textContent = `Lv.${state.level}`;
     this.botsValEl.textContent = `🐍 x${state.botsEaten}`;
     this.questsValEl.textContent = String(state.questsSolved);
-    this.scoreSublineEl.textContent = `✨ Điểm: ${state.score} • 🏆 Kỷ lục: ${state.best}`;
+    this.scoreSublineEl.textContent = `✨ ${state.score} • 🏆 ${state.best}`;
 
     this.statsGrid.classList.remove('hidden');
     this.scoreSublineEl.classList.remove('hidden');
     this.praiseEl.classList.remove('hidden');
     this.controllerLine.classList.add('hidden');
     this.huntTipEl.classList.add('hidden');
+    this.ageCardsRow.classList.remove('hidden');
     this.nicknameRow.classList.remove('hidden');
     this.setupSection.classList.remove('hidden');
     this.guideSection.classList.add('hidden');
@@ -395,6 +464,7 @@ export class GameOverlay {
     this.primaryBtn.textContent = '🔄 Chơi Lại Ngay (✕)';
     this.ctaHintEl.textContent = 'Bấm ✕ trên DualSense hoặc Enter để chơi ván mới!';
     this.renderSelections();
+    this.renderAgeCards();
     this.rootEl.classList.remove('hidden');
   }
 
@@ -422,7 +492,12 @@ export class GameOverlay {
       this.callbacks.onRestartGame();
       return;
     }
-    this.callbacks.onStartGame(this.selectedMode, this.selectedDifficulty, playerName);
+    this.callbacks.onStartGame(
+      this.selectedMode,
+      this.selectedDifficulty,
+      playerName,
+      this.selectedAgeProfile,
+    );
   }
 
   private buildOptionGroup<T extends string>(
@@ -436,7 +511,8 @@ export class GameOverlay {
       const btn = el('button', {
         className: 'option-pill',
         type: 'button',
-        text: opt.labelVi,
+        text: opt.shortLabelVi,
+        ariaLabel: opt.labelVi,
         title: opt.descVi,
       });
       btn.addEventListener('click', () => {
@@ -465,6 +541,7 @@ export class GameOverlay {
   private renderSelections(): void {
     this.rootEl.dataset['mode'] = this.selectedMode;
     this.rootEl.dataset['difficulty'] = this.selectedDifficulty;
+    this.rootEl.dataset['ageProfile'] = this.selectedAgeProfile;
     for (const [id, btn] of this.modeButtons) {
       btn.classList.toggle('active', id === this.selectedMode);
     }
@@ -476,19 +553,23 @@ export class GameOverlay {
     }
   }
 
+  private renderAgeCards(): void {
+    this.rootEl.dataset['ageProfile'] = this.selectedAgeProfile;
+    for (const card of this.ageCardsRow.querySelectorAll<HTMLElement>('.age-profile-card')) {
+      card.classList.toggle('active', card.dataset['ageProfile'] === this.selectedAgeProfile);
+    }
+  }
+
   private encouragingLine(state: GameState): string {
     if (state.playerRank <= 3) {
-      return `Xuất sắc! Bé đạt Hạng #${state.playerRank} với Lv.${state.level} trên bảng xếp hạng! 🏆`;
+      return `Hạng #${state.playerRank} Lv.${state.level}! 🏆`;
     }
     if (state.botsEaten >= 5) {
-      return `Thợ săn Bot siêu đỉnh! Bé đã nuốt gọn ${state.botsEaten} rắn Bot trong trận vừa rồi! 🐍`;
+      return `Nuốt ${state.botsEaten} Bot! 🐍`;
     }
     if (state.questsSolved >= 2) {
-      return 'Trí tuệ siêu phàm! Bé đã giải xuất sắc rất nhiều câu đố +10 Cấp! 🧠';
+      return 'Giải đố siêu giỏi! 🧠';
     }
-    if (state.score >= 50) {
-      return 'Bé điều khiển rắn 360° khéo lắm! Thử thêm ván nữa để lên Top 1 nhé! 💖';
-    }
-    return 'Cố lên nhé! Bắn đạn giảm cấp Bot mạnh rồi săn ngọc vàng để lên cấp thật nhanh! 🌸';
+    return 'Cố lên nhé! 🌸';
   }
 }

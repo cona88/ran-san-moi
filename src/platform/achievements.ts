@@ -27,7 +27,7 @@ export const ACHIEVEMENTS: readonly AchievementDef[] = [
   {
     id: 'meteor-shooter',
     name: 'Xạ Thủ Sao Băng',
-    description: 'Hạ gục 5 quái vật bằng đạn phép thuật!',
+    description: 'Hạ gục 5 quái vật bằng luồng phun nguyên tố!',
     icon: '🏹',
   },
   {

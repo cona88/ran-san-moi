@@ -2,6 +2,7 @@ import type {
   AbsorbedBotPower,
   BotSkin,
   BotSnake,
+  Difficulty,
   GameConfig,
   GameState,
   LeaderboardEntry,
@@ -10,11 +11,12 @@ import type {
   Vec2,
   WorldOrb,
 } from './types';
+import { difficultyTuningFor } from './config';
 import { advanceSpineFollowLeader, buildStraightSpine, matchSpineLength } from './movement';
-import { appendEvents, grantBoosterCharge, type EventDraft } from './quests';
+import { appendEvents, applyXpAndScore, grantBoosterCharge, type EventDraft } from './quests';
 import { nextFloat, nextInt } from './rng';
 import { angleDiff, clamp, euclideanDistance, normalizeAngle } from './systems/arena';
-import { minDistanceToChain } from './systems/collision';
+import { distancePointToSegment, minDistanceToChain } from './systems/collision';
 import { scatterLootOrbs } from './systems/food';
 
 export const BOT_NAMES: readonly string[] = [
@@ -48,6 +50,9 @@ export const BOT_SKINS: readonly BotSkin[] = [
   'spirit',
 ];
 
+/** Global bot movement speed multiplier (-20% speed for friendlier pacing). */
+export const BOT_SPEED_SCALE = 0.8;
+
 /** Map a bot's visual skin to the magical {@link SnakeForm} power absorbed when defeated. */
 export function powerFormForSkin(skin: BotSkin): SnakeForm {
   switch (skin) {
@@ -69,7 +74,7 @@ export function powerFormForSkin(skin: BotSkin): SnakeForm {
 export function absorbedPowerTitle(form: SnakeForm): string {
   switch (form) {
     case 'dragon':
-      return 'Hấp thụ: Bắn Siêu Tốc x2 🌸';
+      return 'Hấp thụ: Phun Lửa Siêu Tốc x2 🌸';
     case 'phoenix':
       return 'Hấp thụ: Đóng Băng Xung Quanh 🦋';
     case 'unicorn':
@@ -86,6 +91,14 @@ export function targetBotSpineLength(level: number, isBoss = false): number {
     return clamp(22 + Math.floor(Math.sqrt(safeLevel) * 3), 22, 46);
   }
   return clamp(7 + Math.floor(Math.sqrt(safeLevel) * 3.2), 7, 36);
+}
+
+/** Effective target spine length accounting for segments already bitten off. */
+export function effectiveBotSpineLength(bot: BotSnake): number {
+  return Math.max(
+    1,
+    targetBotSpineLength(bot.maxLevel ?? bot.level, bot.isBoss) - (bot.bittenSegments ?? 0),
+  );
 }
 
 /** Collision radius of a bot snake (~0.85..1.35, slightly larger for Boss). */
@@ -163,6 +176,9 @@ function buildBotEntity(params: {
     skin: params.skin,
     isBoss: params.isBoss,
     level: params.level,
+    maxLevel: params.level,
+    chompedTicks: 0,
+    bittenSegments: 0,
     head: params.head,
     prevHead: params.head,
     heading: params.heading,
@@ -173,26 +189,32 @@ function buildBotEntity(params: {
   };
 }
 
-/** Spawn the initial set of AI bots around the open world (`>= 10` units from player). */
+/** Spawn the initial set of AI bots around the open world with safe spawn clearance. */
 export function createInitialBots(params: {
   readonly config: GameConfig;
   readonly playerHead: Vec2;
   readonly playerLevel: number;
+  readonly difficulty?: Difficulty;
   readonly rng: RngState;
 }): { bots: BotSnake[]; rng: RngState } {
   const count = params.config.botCount;
   let rng = params.rng;
   const bots: BotSnake[] = [];
-  const nearLowCount = Math.min(4, Math.max(2, Math.floor(count / 3)));
+  const tuning = difficultyTuningFor(params.difficulty ?? 'normal');
+  const nearLowCount = Math.min(count, tuning.nearLowBotCount);
 
   for (let i = 0; i < count; i++) {
     const id = i + 1;
     const isNearLow = i < nearLowCount;
 
+    const maxAmbientDist =
+      !isNearLow && params.config.worldRadius > 100 && i % 2 === 0
+        ? Math.min(params.config.worldRadius - 3, 95)
+        : Math.max(22, params.config.worldRadius - 3);
     const ring = sampleRingPos({
       center: params.playerHead,
-      minDist: isNearLow ? 10.5 : 13,
-      maxDist: isNearLow ? 18.5 : Math.max(22, params.config.worldRadius - 3),
+      minDist: isNearLow ? tuning.nearLowMinDist : 16,
+      maxDist: isNearLow ? tuning.nearLowMaxDist : maxAmbientDist,
       config: params.config,
       rng,
     });
@@ -207,7 +229,7 @@ export function createInitialBots(params: {
       const tier = nextFloat(rng);
       const sub = nextInt(tier.next, 100);
       rng = sub.next;
-      if (tier.value < 0.6) {
+      if (tier.value < 0.7) {
         level = 1 + (sub.value % Math.max(1, params.playerLevel - 1));
       } else if (tier.value < 0.85) {
         level = params.playerLevel + 1 + (sub.value % 6);
@@ -261,10 +283,15 @@ export function replenishBots(params: {
   const minDist = Math.min(22.5, Math.max(11, params.config.worldRadius * 0.65));
 
   for (let i = 0; i < needed; i++) {
+    const fullMaxDist = Math.max(minDist + 8, params.config.worldRadius - 3);
+    const maxDist =
+      params.config.worldRadius > 100 && i % 2 === 0
+        ? Math.max(minDist + 8, Math.min(fullMaxDist, 95))
+        : fullMaxDist;
     const ring = sampleRingPos({
       center: params.playerHead,
       minDist,
-      maxDist: Math.max(minDist + 8, params.config.worldRadius - 3),
+      maxDist,
       config: params.config,
       rng,
     });
@@ -275,7 +302,7 @@ export function replenishBots(params: {
     rng = sub.next;
 
     let level: number;
-    if (tier.value < 0.6) {
+    if (tier.value < 0.7) {
       const maxLow = Math.max(1, params.playerLevel - 1);
       level = Math.max(
         1,
@@ -370,21 +397,77 @@ export function repelBotFrom(
   };
   const nextHeading = normalizeAngle(Math.atan2(nz, nx));
   const nextLevel = Math.max(1, bot.level - levelPenalty);
-  const nextSpine = advanceSpineFollowLeader(
-    bot.spine,
-    nextHead,
-    nextHeading,
-    targetBotSpineLength(nextLevel, bot.isBoss),
+  const nextMaxLevel = Math.max(1, (bot.maxLevel ?? bot.level) - levelPenalty);
+  const nextLen = Math.max(
+    1,
+    Math.min(
+      bot.spine.length,
+      targetBotSpineLength(nextMaxLevel, bot.isBoss) - (bot.bittenSegments ?? 0),
+    ),
   );
+  const nextSpine = advanceSpineFollowLeader(bot.spine, nextHead, nextHeading, nextLen);
   return {
     ...bot,
     level: nextLevel,
+    maxLevel: nextMaxLevel,
     head: nextHead,
     prevHead: nextHead,
     heading: nextHeading,
     spine: nextSpine,
     prevSpine: nextSpine.map((p) => ({ ...p })),
   };
+}
+
+/**
+ * Evaluate an AoE strike against a single bot: either eliminate weaker non-boss bots
+ * outright, or slash level/maxLevel/spine consistently, stun, and optionally repel.
+ */
+export function shrinkOrEliminateHelper(
+  bot: BotSnake,
+  opts: {
+    readonly playerLevel: number;
+    readonly killMargin: number;
+    readonly levelDamage: number;
+    readonly stunTicks: number;
+    readonly center: Vec2;
+    readonly knockbackDist?: number;
+    readonly worldRadius: number;
+  },
+): { readonly eliminated: boolean; readonly bot: BotSnake } {
+  if (
+    !bot.isBoss &&
+    (bot.level <= opts.playerLevel + opts.killMargin || bot.level - opts.levelDamage <= 1)
+  ) {
+    return { eliminated: true, bot };
+  }
+
+  const nextLevel = Math.max(1, bot.level - opts.levelDamage);
+  const nextMaxLevel = Math.max(1, (bot.maxLevel ?? bot.level) - opts.levelDamage);
+  const trimmedLen = Math.min(
+    bot.spine.length,
+    Math.max(1, targetBotSpineLength(nextMaxLevel, bot.isBoss) - (bot.bittenSegments ?? 0)),
+  );
+  const trimmedSpine = matchSpineLength(bot.spine, trimmedLen);
+  const prevSource = bot.prevSpine.length > 0 ? bot.prevSpine : trimmedSpine;
+  const trimmedPrevSpine = matchSpineLength(prevSource, trimmedLen);
+
+  let updated: BotSnake = {
+    ...bot,
+    level: nextLevel,
+    maxLevel: nextMaxLevel,
+    frozenTicks: Math.max(bot.frozenTicks, opts.stunTicks),
+    spine: trimmedSpine,
+    prevSpine: trimmedPrevSpine,
+  };
+
+  const knockback = opts.knockbackDist ?? 0;
+  if (knockback > 0) {
+    const dist = Math.hypot(updated.head.x - opts.center.x, updated.head.z - opts.center.z);
+    const targetDist = Math.max(dist + knockback, knockback);
+    updated = repelBotFrom(updated, opts.center, targetDist, opts.worldRadius, 0);
+  }
+
+  return { eliminated: false, bot: updated };
 }
 
 /** Compute desired steering heading for a single bot AI. */
@@ -406,10 +489,21 @@ function chooseBotHeading(params: {
     return { heading: Math.atan2(-bot.head.z, -bot.head.x), rng: params.rng };
   }
 
+  // 1b. Active-chomp evasion: veer away from playerHead within 5.0 units while stunned
+  const playerHead = playerSnake[0];
+  if ((bot.chompedTicks ?? 0) > 0 && playerHead !== undefined) {
+    const chompDist = euclideanDistance(bot.head, playerHead);
+    if (chompDist <= 5.0) {
+      return {
+        heading: normalizeAngle(Math.atan2(bot.head.z - playerHead.z, bot.head.x - playerHead.x)),
+        rng: params.rng,
+      };
+    }
+  }
+
   // 2. Threat avoidance (stronger snakes nearby)
   let threatPoint: Vec2 | null = null;
   let threatDist = 9.5;
-  const playerHead = playerSnake[0];
   if (playerHead && playerLevel > bot.level) {
     const d = euclideanDistance(bot.head, playerHead);
     if (d < threatDist) {
@@ -492,6 +586,7 @@ export function stepBots(params: {
   readonly playerProtected: boolean;
   readonly playerPhoenixAura: boolean;
   readonly config: GameConfig;
+  readonly difficulty?: Difficulty;
   readonly rng: RngState;
 }): { bots: BotSnake[]; orbs: WorldOrb[]; rng: RngState } {
   if (params.bots.length === 0) {
@@ -515,7 +610,10 @@ export function stepBots(params: {
     }
 
     const isFrozen = frozenTicks > 0;
+    const isDeepFrozen = frozenTicks >= 25;
     const nextFrozenTicks = isFrozen ? frozenTicks - 1 : 0;
+    const isChomped = (bot.chompedTicks ?? 0) > 0;
+    const nextChompedTicks = Math.max(0, (bot.chompedTicks ?? 0) - 1);
 
     const steered = chooseBotHeading({
       bot,
@@ -533,15 +631,25 @@ export function stepBots(params: {
     const deltaAngle = clamp(angleDiff(bot.heading, steered.heading), -turnRate, turnRate);
     const nextHeading = normalizeAngle(bot.heading + deltaAngle);
 
-    const baseBotSpeed = params.config.baseSpeed * (bot.isBoss ? 0.92 : 0.88);
-    const speed = isFrozen ? baseBotSpeed * 0.25 : baseBotSpeed;
+    const diffSpeedScale = params.difficulty
+      ? difficultyTuningFor(params.difficulty).botSpeedScale
+      : 1;
+    const baseBotSpeed =
+      params.config.baseSpeed * (bot.isBoss ? 0.92 : 0.88) * BOT_SPEED_SCALE * diffSpeedScale;
+    const speed = isDeepFrozen
+      ? baseBotSpeed * 0.08
+      : isFrozen
+        ? baseBotSpeed * 0.25
+        : isChomped
+          ? baseBotSpeed * 0.22
+          : baseBotSpeed;
 
     const nextHead: Vec2 = {
       x: clamp(bot.head.x + Math.cos(nextHeading) * speed, -worldBound, worldBound),
       z: clamp(bot.head.z + Math.sin(nextHeading) * speed, -worldBound, worldBound),
     };
 
-    const targetLen = targetBotSpineLength(bot.level, bot.isBoss);
+    const targetLen = Math.min(effectiveBotSpineLength(bot), Math.max(1, bot.spine.length));
     const nextSpine = advanceSpineFollowLeader(bot.spine, nextHead, nextHeading, targetLen);
     const prevSpine = matchSpineLength(bot.spine, nextSpine.length);
 
@@ -553,6 +661,7 @@ export function stepBots(params: {
       spine: nextSpine,
       prevSpine,
       frozenTicks: nextFrozenTicks,
+      chompedTicks: nextChompedTicks,
     });
   }
 
@@ -572,44 +681,107 @@ export function stepBots(params: {
     }
     if (levelGain === 0) return bot;
     const nextLevel = Math.min(250, bot.level + levelGain);
-    return { ...bot, level: nextLevel };
+    const nextMaxLevel = Math.max(bot.maxLevel ?? bot.level, nextLevel);
+    const rawNextBitten = Math.max(0, (bot.bittenSegments ?? 0) - levelGain * 2);
+    const targetMaxLen = targetBotSpineLength(nextMaxLevel, bot.isBoss);
+    const maxAllowedLen = Math.max(1, targetMaxLen - rawNextBitten);
+    const nextLen = Math.min(maxAllowedLen, bot.spine.length + 1);
+    const nextBitten =
+      (bot.bittenSegments ?? 0) > 0
+        ? Math.max(rawNextBitten, Math.max(0, targetMaxLen - nextLen))
+        : 0;
+    if (nextLen > bot.spine.length) {
+      const nextSpine = advanceSpineFollowLeader(bot.spine, bot.head, bot.heading, nextLen);
+      const nextPrevSpine = matchSpineLength(bot.prevSpine, nextSpine.length);
+      return {
+        ...bot,
+        level: nextLevel,
+        maxLevel: nextMaxLevel,
+        bittenSegments: nextBitten,
+        spine: nextSpine,
+        prevSpine: nextPrevSpine,
+      };
+    }
+    return {
+      ...bot,
+      level: nextLevel,
+      maxLevel: nextMaxLevel,
+      bittenSegments: nextBitten,
+    };
   });
 
   let nextOrbs =
     eatenOrbIds.size > 0 ? params.orbs.filter((o) => !eatenOrbIds.has(o.id)) : [...params.orbs];
 
-  // 3. Bot-vs-Bot elimination (stronger bot eats weaker non-boss bot)
+  // 3. Bot-vs-Bot progressive chomping (stronger bot bites up to 2 segments/tick)
+  const workingBots = [...botsAfterOrbs];
   const defeatedIds = new Set<number>();
-  const levelBoostByBot = new Map<number, number>();
 
-  for (let i = 0; i < botsAfterOrbs.length; i++) {
-    const a = botsAfterOrbs[i]!;
-    if (defeatedIds.has(a.id)) continue;
+  for (let i = 0; i < workingBots.length; i++) {
+    if (defeatedIds.has(workingBots[i]!.id)) continue;
 
-    for (let j = i + 1; j < botsAfterOrbs.length; j++) {
-      const b = botsAfterOrbs[j]!;
+    for (let j = i + 1; j < workingBots.length; j++) {
+      const a = workingBots[i]!;
+      const b = workingBots[j]!;
+      if (defeatedIds.has(a.id)) break;
       if (defeatedIds.has(b.id)) continue;
       if (a.level === b.level) continue;
 
-      const stronger = a.level > b.level ? a : b;
-      const weaker = a.level > b.level ? b : a;
-      if (weaker.isBoss) continue;
+      const aIsStronger = a.level > b.level;
+      const strongerIdx = aIsStronger ? i : j;
+      const weakerIdx = aIsStronger ? j : i;
+      const stronger = workingBots[strongerIdx]!;
+      const weaker = workingBots[weakerIdx]!;
+      if (weaker.isBoss || weaker.spine.length === 0) continue;
 
       const hitRadius = botCollisionRadius(weaker.level, weaker.isBoss);
-      const strongerHitsWeaker = minDistanceToChain(stronger.head, weaker.spine) < hitRadius;
-      const weakerHitsStronger =
-        minDistanceToChain(weaker.head, stronger.spine) <
-        botCollisionRadius(stronger.level, stronger.isBoss);
+      const candidates: { idx: number; dist: number }[] = [];
+      for (let idx = 0; idx < weaker.spine.length; idx++) {
+        const seg = weaker.spine[idx]!;
+        if (distancePointToSegment(seg, stronger.prevHead, stronger.head) < hitRadius) {
+          candidates.push({ idx, dist: euclideanDistance(seg, stronger.head) });
+        }
+      }
+      candidates.sort((x, y) => x.dist - y.dist || x.idx - y.idx);
+      let eatenIndices = candidates.slice(0, 2).map((c) => c.idx);
 
-      if (strongerHitsWeaker || weakerHitsStronger) {
+      if (eatenIndices.length === 0) {
+        const weakerHitsStronger =
+          minDistanceToChain(weaker.head, stronger.spine) <
+          botCollisionRadius(stronger.level, stronger.isBoss);
+        if (weakerHitsStronger) {
+          eatenIndices = weaker.spine.length >= 3 ? [0, 1] : [0];
+        }
+      }
+
+      if (eatenIndices.length === 0) continue;
+
+      if (eatenIndices.length >= weaker.spine.length) {
         defeatedIds.add(weaker.id);
-        const gain = Math.max(1, Math.ceil(weaker.level * 0.25));
-        levelBoostByBot.set(stronger.id, (levelBoostByBot.get(stronger.id) ?? 0) + gain);
-
+        const gain = Math.max(1, Math.ceil((weaker.maxLevel ?? weaker.level) * 0.25));
+        const nextStrongerLevel = Math.min(250, stronger.level + gain);
+        workingBots[strongerIdx] = {
+          ...stronger,
+          level: nextStrongerLevel,
+          maxLevel: Math.max(stronger.maxLevel ?? stronger.level, nextStrongerLevel),
+        };
         const scattered = scatterLootOrbs({
           orbs: nextOrbs,
           spine: weaker.spine,
-          count: 5,
+          count: eatenIndices.length,
+          value: 3,
+          config: params.config,
+          rng,
+        });
+        nextOrbs = scattered.orbs;
+        rng = scattered.rng;
+      } else {
+        const chomped = applyPartialBotChomp(weaker, eatenIndices, 10);
+        workingBots[weakerIdx] = chomped.bot;
+        const scattered = scatterLootOrbs({
+          orbs: nextOrbs,
+          spine: chomped.eatenCells,
+          count: eatenIndices.length,
           value: 3,
           config: params.config,
           rng,
@@ -620,16 +792,7 @@ export function stepBots(params: {
     }
   }
 
-  const survivingBots: BotSnake[] = [];
-  for (const bot of botsAfterOrbs) {
-    if (defeatedIds.has(bot.id)) continue;
-    const boost = levelBoostByBot.get(bot.id) ?? 0;
-    if (boost > 0) {
-      survivingBots.push({ ...bot, level: Math.min(250, bot.level + boost) });
-    } else {
-      survivingBots.push(bot);
-    }
-  }
+  const survivingBots = workingBots.filter((bot) => !defeatedIds.has(bot.id));
 
   return { bots: survivingBots, orbs: nextOrbs, rng };
 }
@@ -717,12 +880,235 @@ export function computeLeaderboard(params: {
   return { leaderboard, playerRank, crownTarget };
 }
 
+/** Remove eaten segments from `bot.spine`, rejoin smoothly, and update chomp metadata. */
+function applyPartialBotChomp(
+  bot: BotSnake,
+  eatenIndices: readonly number[],
+  stunTicks: number,
+): { readonly bot: BotSnake; readonly eatenCells: Vec2[] } {
+  const eatenSet = new Set(eatenIndices);
+  const rawRemaining: Vec2[] = [];
+  for (let i = 0; i < bot.spine.length; i++) {
+    if (!eatenSet.has(i)) {
+      rawRemaining.push(bot.spine[i]!);
+    }
+  }
+  const eatenCells = eatenIndices.map((idx) => bot.spine[idx] ?? bot.head);
+  const newHead = rawRemaining[0]!;
+  const nextBotSpine = advanceSpineFollowLeader(
+    rawRemaining,
+    newHead,
+    bot.heading,
+    rawRemaining.length,
+  );
+  const nextPrevSpine = matchSpineLength(rawRemaining, nextBotSpine.length);
+  const peakLevel = bot.maxLevel ?? bot.level;
+  const nextBitten = (bot.bittenSegments ?? 0) + eatenIndices.length;
+  const computedLevel = Math.max(
+    1,
+    Math.ceil(peakLevel * (nextBotSpine.length / Math.max(1, nextBitten + nextBotSpine.length))),
+  );
+  const nextBotLevel = Math.min(bot.level, computedLevel);
+
+  return {
+    bot: {
+      ...bot,
+      level: nextBotLevel,
+      maxLevel: peakLevel,
+      bittenSegments: nextBitten,
+      chompedTicks: Math.max(bot.chompedTicks ?? 0, stunTicks),
+      head: nextBotSpine[0]!,
+      prevHead: rawRemaining[0] ?? bot.head,
+      spine: nextBotSpine,
+      prevSpine: nextPrevSpine,
+    },
+    eatenCells,
+  };
+}
+
+function chompMessageForStreak(streak: number): string {
+  if (streak >= 8) return 'Đại Tiệc! 👑';
+  if (streak >= 5) return 'Siêu Măm! ⚡';
+  if (streak >= 3) return 'Rốp rốp! 🔥';
+  return 'Ngoạm! 🐍';
+}
+
+/**
+ * Progressively chomp `1..3` segments of a weaker/equal bot touched by the player,
+ * only finishing via {@link resolveBotDefeated} when the final segment is eaten.
+ */
+export function chompBotByPlayer(
+  state: GameState,
+  bot: BotSnake,
+  prevHead: Vec2,
+  nextHead: Vec2,
+  isFast: boolean,
+): GameState {
+  if (bot.level > state.level || bot.spine.length === 0) {
+    return state;
+  }
+
+  const effectivePrevHead =
+    Math.hypot(nextHead.x - prevHead.x, nextHead.z - prevHead.z) > 4 ? nextHead : prevHead;
+  const biteRadius = Math.max(
+    1.2,
+    botCollisionRadius(bot.level, bot.isBoss) + (state.chompStreak > 0 ? 0.24 : 0.1),
+  );
+
+  const candidates: { idx: number; distToNextHead: number }[] = [];
+  for (let idx = 0; idx < bot.spine.length; idx++) {
+    const seg = bot.spine[idx]!;
+    if (distancePointToSegment(seg, effectivePrevHead, nextHead) <= biteRadius) {
+      candidates.push({
+        idx,
+        distToNextHead: euclideanDistance(seg, nextHead),
+      });
+    }
+  }
+  candidates.sort((a, b) => a.distToNextHead - b.distToNextHead || a.idx - b.idx);
+
+  const fromHeadSweep = candidates.length > 0;
+  let eatenCandidates = candidates.map((c) => c.idx);
+
+  if (!fromHeadSweep) {
+    if (minDistanceToChain(bot.head, state.snake) < botCollisionRadius(bot.level, bot.isBoss)) {
+      eatenCandidates = bot.spine.length >= 3 ? [0, 1] : [0];
+    }
+  }
+
+  if (eatenCandidates.length === 0) {
+    return state;
+  }
+
+  const maxBites = isFast ? 3 : 2;
+  const eatenIndices = eatenCandidates.slice(0, maxBites);
+  const eatenCount = eatenIndices.length;
+  const nextStreak = state.chompStreak + eatenCount;
+  const chompStreakTicks = 16;
+  const biteCell = bot.spine[eatenIndices[0]!] ?? bot.head;
+
+  if (eatenCount >= bot.spine.length) {
+    return resolveBotDefeated(
+      { ...state, chompStreak: nextStreak, chompStreakTicks },
+      { ...bot, level: bot.maxLevel ?? bot.level },
+      biteCell,
+    );
+  }
+
+  const chomped = applyPartialBotChomp(bot, eatenIndices, 14);
+  const nextBots = state.bots.map((b) => (b.id === bot.id ? chomped.bot : b));
+  const scattered = scatterLootOrbs({
+    orbs: state.orbs,
+    spine: chomped.eatenCells,
+    count: eatenCount,
+    value: 3,
+    config: state.config,
+    rng: state.rng,
+  });
+
+  const bitePoints = eatenCount * ((bot.isBoss ? 20 : 12) + Math.min(28, nextStreak * 3));
+  const biteXp = eatenCount * (bot.isBoss ? 5 : 3);
+  const ev = appendEvents(state.events, state.eventSeq, [
+    {
+      kind: 'bot_chomp',
+      cell: biteCell,
+      form: bot.powerForm,
+      points: bitePoints,
+      chompStreak: nextStreak,
+      messageVi: chompMessageForStreak(nextStreak),
+    },
+  ]);
+  const xpRes = applyXpAndScore({
+    score: state.score,
+    best: state.best,
+    level: state.level,
+    xp: state.xp,
+    gainXp: biteXp,
+    points: bitePoints,
+    events: ev.events,
+    eventSeq: ev.eventSeq,
+    cell: biteCell,
+  });
+
+  const bossProgress = bot.isBoss
+    ? state.bossProgress
+    : Math.min(100, state.bossProgress + eatenCount * 2);
+  const board = computeLeaderboard({
+    playerName: state.playerName,
+    playerLevel: xpRes.level,
+    bots: nextBots,
+    activeBossId: state.activeBossId,
+  });
+
+  // Feast-Assist Nudge: softly pull the player's head along the surviving bot body
+  let nextSnake = state.snake;
+  let nextPrevSnake = state.prevSnake;
+  const playerHead = state.snake[0];
+  if (fromHeadSweep && chomped.bot.spine.length > 0 && playerHead !== undefined) {
+    let nearestSurviving: Vec2 | null = null;
+    let nearestDist = Infinity;
+    for (const seg of chomped.bot.spine) {
+      const d = euclideanDistance(seg, nextHead);
+      if (d < nearestDist) {
+        nearestDist = d;
+        nearestSurviving = seg;
+      }
+    }
+    if (nearestSurviving !== null && nearestDist > 0.15 && nearestDist < 1.85) {
+      const dx = nearestSurviving.x - playerHead.x;
+      const dz = nearestSurviving.z - playerHead.z;
+      const dHead = Math.hypot(dx, dz);
+      if (dHead > 0.15 && dHead < 1.85) {
+        const safeRadius = Math.max(2, state.config.worldRadius - 0.8);
+        const nudgedHead: Vec2 = {
+          x: clamp(playerHead.x + (dx / dHead) * 0.14, -safeRadius, safeRadius),
+          z: clamp(playerHead.z + (dz / dHead) * 0.14, -safeRadius, safeRadius),
+        };
+        nextSnake = advanceSpineFollowLeader(
+          state.snake,
+          nudgedHead,
+          state.heading,
+          state.snake.length,
+        );
+        nextPrevSnake = matchSpineLength(state.prevSnake, nextSnake.length);
+      }
+    }
+  }
+
+  return {
+    ...state,
+    snake: nextSnake,
+    prevSnake: nextPrevSnake,
+    bots: nextBots,
+    orbs: scattered.orbs,
+    rng: scattered.rng,
+    chompStreak: nextStreak,
+    chompStreakTicks,
+    score: xpRes.score,
+    best: xpRes.best,
+    level: xpRes.level,
+    xp: xpRes.xp,
+    bossProgress,
+    leaderboard: board.leaderboard,
+    playerRank: board.playerRank,
+    crownTarget: board.crownTarget,
+    events: xpRes.events,
+    eventSeq: xpRes.eventSeq,
+  };
+}
+
 /**
  * Reward the player when a bot (or Boss) is eaten or destroyed by projectiles:
  * scatter loot orbs, boost level/score, grant absorbedPower, advance Boss progress & boosters.
  */
 export function resolveBotDefeated(state: GameState, bot: BotSnake, hitPos?: Vec2): GameState {
-  const lootCount = clamp(Math.floor(bot.spine.length * 0.65), 8, 16);
+  const lootCount = clamp(
+    Math.floor(
+      Math.max(bot.spine.length, (bot.bittenSegments ?? 0) * 0.45 + bot.spine.length) * 0.65,
+    ),
+    8,
+    16,
+  );
   const scattered = scatterLootOrbs({
     orbs: state.orbs,
     spine: bot.spine,

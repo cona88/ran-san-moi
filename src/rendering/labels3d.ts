@@ -431,11 +431,14 @@ export class Labels3DView {
 
       const isNextSeq =
         quest?.kind === 'sequence' && vis.orb.sequenceOrder === quest.nextSequenceIndex;
-      const pulse = isNextSeq
+      const isLetterNextSeq =
+        quest?.kind === 'word_spell' && vis.orb.sequenceOrder === quest.nextSequenceIndex;
+      const isActiveOrb = isNextSeq || isLetterNextSeq;
+      const pulse = isActiveOrb
         ? 1 + 0.14 * Math.sin(elapsed * 6.5)
         : 1 + 0.05 * Math.sin(elapsed * 3 + phase);
       vis.core.scale.setScalar(pulse);
-      vis.floorRing.material.opacity = isNextSeq ? 0.55 + 0.35 * Math.sin(elapsed * 6.5) : 0.42;
+      vis.floorRing.material.opacity = isActiveOrb ? 0.55 + 0.35 * Math.sin(elapsed * 6.5) : 0.42;
     }
   }
 
@@ -449,16 +452,28 @@ export class Labels3DView {
 
   private createOrbVisual(orb: QuestOrb, quest: BrainQuest): OrbVisual {
     const formMeta = orb.formColor ? FORM_METADATA[orb.formColor] : undefined;
-    const hexColor = formMeta ? formMeta.hexColor : quest.kind === 'sequence' ? 0xffd447 : 0x9b7dff;
+    const isLetterQuest = quest.kind === 'letter_match' || quest.kind === 'word_spell';
+    const hexColor = formMeta
+      ? formMeta.hexColor
+      : isLetterQuest
+        ? 0xc79dff
+        : quest.kind === 'sequence'
+          ? 0xffd447
+          : 0x9b7dff;
     const cssColor = formMeta
       ? formMeta.cssColor
-      : quest.kind === 'sequence'
-        ? '#ffd447'
-        : '#c79dff';
+      : isLetterQuest
+        ? '#c79dff'
+        : quest.kind === 'sequence'
+          ? '#ffd447'
+          : '#c79dff';
 
     const group = new Group();
     const pos = cellToWorld(orb.cell.x, orb.cell.z, this.half);
     group.position.set(pos.x, 0, pos.z);
+
+    // Slightly larger base scale for letter quests
+    const baseScale = isLetterQuest ? 1.62 : 1.0;
 
     const core = new Mesh(
       this.coreGeometry,
@@ -471,6 +486,7 @@ export class Labels3DView {
       }),
     );
     core.position.y = 0.2;
+    core.scale.setScalar(baseScale);
     group.add(core);
 
     const halo = new Mesh(
@@ -503,6 +519,7 @@ export class Labels3DView {
     const tex = this.badgeCache.getOrCreate({
       label: orb.label,
       borderColor: cssColor,
+      subLabel: orb.subLabel,
     });
     const spriteMaterial = new SpriteMaterial({
       map: tex,
@@ -512,7 +529,9 @@ export class Labels3DView {
     });
     const sprite = new Sprite(spriteMaterial);
     sprite.position.set(0, 1.12, 0);
-    sprite.scale.set(1.22, 0.61, 1);
+    const spriteScale = isLetterQuest ? 1.48 : 1.22;
+    const spriteHeight = orb.subLabel ? 0.92 : 0.61;
+    sprite.scale.set(spriteScale, spriteHeight, 1);
     sprite.renderOrder = 12;
     group.add(sprite);
 

@@ -4,6 +4,7 @@ import { Sfx, getSafeAudioContextConstructor, smoothSetGain } from './sfx';
 
 export { Sfx } from './sfx';
 export { MagicalMusic } from './music';
+export { VoiceHelper } from './voice';
 
 export interface SoundEngineOptions {
   soundEnabled?: boolean;
@@ -22,7 +23,7 @@ function clampVolume(value: number): number {
  * Unified Web Audio engine for "Vương Quốc Rắn Phép Thuật 3D".
  *
  * Lazily creates and unlocks the macOS/browser `AudioContext` on first user
- * interaction, routes background music and 23 magical sound effects through
+ * interaction, routes background music and 24 magical sound effects through
  * smoothed `masterGain`, `musicGain`, and `sfxGain` buses, and degrades
  * silently in headless/test environments without Web Audio.
  */
@@ -122,6 +123,12 @@ export class SoundEngine {
     if (this.disposed) return;
     this.lastState = state;
     this.music.updateState(state);
+    this.sfx.updateState(state);
+  }
+
+  /** Update continuous sound effects and music state. */
+  updateState(state: GameState): void {
+    this.updateMusicState(state);
   }
 
   /** Play the sound effect associated with a {@link GameEvent}. */

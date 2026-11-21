@@ -1,17 +1,35 @@
 import '../styles/style.css';
 
 import type {
+  AgeProfile,
   BoosterKind,
+  BotSnake,
+  BrainQuest,
   Difficulty,
+  FairySkillKind,
   GameAction,
   GameMode,
   GameState,
+  Hazard,
+  QuestKind,
   SnakeForm,
+  Vec2,
   VisualTheme,
 } from '../core/types';
-import { createInitialState, reduce } from '../core';
+import {
+  buildStraightSpine,
+  clamp,
+  computeLeaderboard,
+  createInitialState,
+  euclideanDistance,
+  normalizeAngle,
+  powerFormForSkin,
+  reduce,
+  SEGMENT_SPACING,
+  targetBotSpineLength,
+} from '../core';
 import { GameRenderer } from '../rendering';
-import { SoundEngine } from '../audio';
+import { SoundEngine, VoiceHelper } from '../audio';
 import {
   DualSenseManager,
   attachKeyboard,
@@ -40,6 +58,7 @@ import {
   evaluateStreakAchievements,
   loadUnlockedAchievements,
 } from '../platform/achievements';
+import { spawnQuest } from '../core/quests';
 
 /** Fraction of a tick after which a fresh turn snaps forward for crisp steering. */
 const STEP_AHEAD = 0.5;
@@ -49,6 +68,23 @@ const PROJECTILE_STEP_MS = 55;
 const MAX_FRAME_DELTA_MS = 250;
 /** Cap logic simulation steps per animation frame to prevent spiral-of-death stalls. */
 const MAX_STEPS_PER_FRAME = 4;
+
+/** Public E2E/debug bridge exposed on `window.__snakeGame`. */
+export interface SnakeGameTestHook {
+  readonly getState: () => GameState;
+  readonly placeEdibleBotAheadForTest: () => number;
+  readonly placeFrostTargetsAheadForTest?: () => {
+    readonly botId: number;
+    readonly hazardId: number;
+  } | null;
+  readonly spawnQuestForTest: (kind?: QuestKind) => BrainQuest | null;
+}
+
+declare global {
+  interface Window {
+    __snakeGame?: SnakeGameTestHook;
+  }
+}
 
 function bootstrap(): void {
   const appRoot = document.getElementById('app');
@@ -73,6 +109,7 @@ function bootstrap(): void {
     playerName: initialPlayerName,
     best: loadBest(),
     seed: Date.now() >>> 0,
+    ageProfile: currentSettings.ageProfile,
   });
 
   const renderer = new GameRenderer(appRoot, state.config);
@@ -82,6 +119,9 @@ function bootstrap(): void {
     soundEnabled: currentSettings.sound,
     musicEnabled: currentSettings.music,
   });
+
+  const voice = new VoiceHelper();
+  voice.setEnabled(currentSettings.sound);
 
   let acc = 0;
   let projAcc = 0;
@@ -99,14 +139,23 @@ function bootstrap(): void {
     mode: GameMode,
     difficulty: Difficulty,
     playerName?: string,
+    ageProfile?: AgeProfile,
   ): string => {
     const cleanName = sanitizePlayerName(playerName);
+    const age = ageProfile ?? currentSettings.ageProfile;
     if (
       currentSettings.mode !== mode ||
       currentSettings.difficulty !== difficulty ||
-      currentSettings.playerName !== cleanName
+      currentSettings.playerName !== cleanName ||
+      currentSettings.ageProfile !== age
     ) {
-      currentSettings = { ...currentSettings, mode, difficulty, playerName: cleanName };
+      currentSettings = {
+        ...currentSettings,
+        mode,
+        difficulty,
+        playerName: cleanName,
+        ageProfile: age,
+      };
       saveSettings(currentSettings);
     }
     if (loadNickname() !== cleanName) {
@@ -119,22 +168,36 @@ function bootstrap(): void {
     mode: GameMode,
     difficulty: Difficulty,
     playerName?: string,
+    ageProfile?: AgeProfile,
   ): void => {
-    const cleanName = persistSelection(mode, difficulty, playerName ?? ui.getSelectedPlayerName());
+    const cleanName = persistSelection(
+      mode,
+      difficulty,
+      playerName ?? ui.getSelectedPlayerName(),
+      ageProfile,
+    );
+    const age = ageProfile ?? currentSettings.ageProfile;
     if (state.phase === 'paused') {
-      dispatch({ type: 'reset', mode, difficulty, playerName: cleanName });
+      dispatch({ type: 'reset', mode, difficulty, playerName: cleanName, ageProfile: age });
     }
-    dispatch({ type: 'start', mode, difficulty, playerName: cleanName });
+    dispatch({ type: 'start', mode, difficulty, playerName: cleanName, ageProfile: age });
   };
 
   const restartFromSelection = (
     mode: GameMode,
     difficulty: Difficulty,
     playerName?: string,
+    ageProfile?: AgeProfile,
   ): void => {
-    const cleanName = persistSelection(mode, difficulty, playerName ?? ui.getSelectedPlayerName());
-    dispatch({ type: 'reset', mode, difficulty, playerName: cleanName });
-    dispatch({ type: 'start', mode, difficulty, playerName: cleanName });
+    const cleanName = persistSelection(
+      mode,
+      difficulty,
+      playerName ?? ui.getSelectedPlayerName(),
+      ageProfile,
+    );
+    const age = ageProfile ?? currentSettings.ageProfile;
+    dispatch({ type: 'reset', mode, difficulty, playerName: cleanName, ageProfile: age });
+    dispatch({ type: 'start', mode, difficulty, playerName: cleanName, ageProfile: age });
   };
 
   // --- Controls (DualSense + Keyboard + Touch) -------------------------------
@@ -159,6 +222,7 @@ function bootstrap(): void {
           ui.getSelectedMode(),
           ui.getSelectedDifficulty(),
           ui.getSelectedPlayerName(),
+          ui.getSelectedAgeProfile(),
         );
       } else if (state.phase === 'paused') {
         dispatch({ type: 'resume' });
@@ -167,49 +231,74 @@ function bootstrap(): void {
           ui.getSelectedMode(),
           ui.getSelectedDifficulty(),
           ui.getSelectedPlayerName(),
+          ui.getSelectedAgeProfile(),
         );
       }
     },
     togglePause() {
       sound.unlock();
-      if (state.phase === 'playing') dispatch({ type: 'pause' });
-      else if (state.phase === 'paused') dispatch({ type: 'resume' });
+      if (state.phase === 'playing') {
+        if (state.butterflyHold) {
+          dispatch({ type: 'set_butterfly_hold', active: false });
+        }
+        dispatch({ type: 'pause' });
+      } else if (state.phase === 'paused') dispatch({ type: 'resume' });
     },
     shoot() {
       sound.unlock();
       if (state.phase !== 'playing') return;
       dispatch({ type: 'shoot' });
+      ui.flashControlFeedback('shoot', state.form);
     },
     morphNext() {
       sound.unlock();
       if (state.phase !== 'playing') return;
       dispatch({ type: 'morph', delta: 1 });
+      ui.flashControlFeedback('morph', state.form);
     },
     morphPrev() {
       sound.unlock();
       if (state.phase !== 'playing') return;
       dispatch({ type: 'morph', delta: -1 });
+      ui.flashControlFeedback('morph', state.form);
     },
     morphTo(form: SnakeForm) {
       sound.unlock();
       if (state.phase !== 'playing') return;
       dispatch({ type: 'morph', form });
+      ui.flashControlFeedback('morph', state.form);
     },
     setDash(active: boolean) {
       if (active) sound.unlock();
       if (state.phase !== 'playing') return;
       dispatch({ type: 'dash', active });
+      if (active) ui.flashControlFeedback('dash');
     },
     shield() {
       sound.unlock();
       if (state.phase !== 'playing') return;
       dispatch({ type: 'shield' });
+      ui.flashControlFeedback('shield');
     },
     activateBooster(booster: BoosterKind) {
       sound.unlock();
       if (state.phase === 'playing') {
         dispatch({ type: 'activate_booster', booster });
+        ui.flashControlFeedback('booster', booster);
       }
+    },
+    castFairySkill(skill: FairySkillKind) {
+      sound.unlock();
+      if (state.phase === 'playing') {
+        dispatch({ type: 'cast_fairy_skill', skill });
+        ui.flashControlFeedback('skill', skill);
+      }
+    },
+    setButterflyHold(active: boolean) {
+      if (active) sound.unlock();
+      if (state.phase !== 'playing') return;
+      dispatch({ type: 'set_butterfly_hold', active });
+      if (active) ui.flashControlFeedback('skill', 'butterfly');
     },
     cameraLook(nx: number, ny: number) {
       renderer.setCameraLook(nx, ny);
@@ -220,9 +309,9 @@ function bootstrap(): void {
   dualsense.setVibrationEnabled(currentSettings.vibration);
 
   const uiCallbacks: GameUICallbacks = {
-    onStartGame(mode, difficulty, playerName) {
+    onStartGame(mode, difficulty, playerName, ageProfile) {
       sound.unlock();
-      startFromSelection(mode, difficulty, playerName);
+      startFromSelection(mode, difficulty, playerName, ageProfile);
     },
     onResumeGame() {
       sound.unlock();
@@ -234,6 +323,7 @@ function bootstrap(): void {
         ui.getSelectedMode(),
         ui.getSelectedDifficulty(),
         ui.getSelectedPlayerName(),
+        ui.getSelectedAgeProfile(),
       );
     },
     onTogglePause() {
@@ -242,6 +332,7 @@ function bootstrap(): void {
     onSelectForm(form) {
       sound.unlock();
       dispatch({ type: 'morph', form });
+      ui.flashControlFeedback('morph', state.form);
     },
     onActivateBooster(booster) {
       controls.activateBooster(booster);
@@ -257,6 +348,7 @@ function bootstrap(): void {
       currentSettings = { ...currentSettings, sound: enabled };
       saveSettings(currentSettings);
       sound.setSoundEnabled(enabled);
+      voice.setEnabled(enabled);
     },
     onToggleMusic(enabled) {
       sound.unlock();
@@ -273,6 +365,22 @@ function bootstrap(): void {
     onConnectWebHid() {
       sound.unlock();
       return dualsense.connectWebHid(state.form);
+    },
+    onSelectAgeProfile(ageProfile: AgeProfile) {
+      sound.unlock();
+      currentSettings = { ...currentSettings, ageProfile };
+      saveSettings(currentSettings);
+      dispatch({ type: 'set_age_profile', ageProfile });
+      ui.getOverlay().setAgeProfile(ageProfile);
+    },
+    onCastFairySkill(skill: FairySkillKind) {
+      controls.castFairySkill(skill);
+    },
+    onButterflyHold(active: boolean) {
+      controls.setButterflyHold(active);
+    },
+    onSpeakQuest() {
+      voice.speakQuest(state.quest);
     },
   };
 
@@ -291,6 +399,7 @@ function bootstrap(): void {
       sound.onEvent(ev, next);
       renderer.onEvent(ev, next);
       dualsense.onEvent(ev, next);
+      voice.onEvent(ev, next);
       const screenPos = ev.cell ? renderer.projectCell(ev.cell) : null;
       ui.onEvent(ev, next, screenPos);
     }
@@ -327,6 +436,7 @@ function bootstrap(): void {
     const needsFullSync =
       next.snake !== prev.snake ||
       next.bots !== prev.bots ||
+      next.chompStreak !== prev.chompStreak ||
       next.orbs !== prev.orbs ||
       next.phase !== prev.phase ||
       next.form !== prev.form ||
@@ -335,7 +445,9 @@ function bootstrap(): void {
       next.playerRank !== prev.playerRank ||
       next.arenaMargin !== prev.arenaMargin ||
       next.pendingShrink !== prev.pendingShrink ||
-      next.config !== prev.config;
+      next.config !== prev.config ||
+      next.butterflyStage !== prev.butterflyStage ||
+      next.sprayActiveTicks !== prev.sprayActiveTicks;
 
     if (needsFullSync) {
       renderer.sync(next);
@@ -344,7 +456,12 @@ function bootstrap(): void {
       next.hazards !== prev.hazards ||
       next.quest !== prev.quest ||
       next.food !== prev.food ||
-      next.bonusFood !== prev.bonusFood
+      next.bonusFood !== prev.bonusFood ||
+      next.gardenFlowers !== prev.gardenFlowers ||
+      next.lightningBolts !== prev.lightningBolts ||
+      next.aoeBlasts !== prev.aoeBlasts ||
+      next.silkWebs !== prev.silkWebs ||
+      next.frostZones !== prev.frostZones
     ) {
       renderer.syncProjectiles(next);
     }
@@ -366,6 +483,198 @@ function bootstrap(): void {
   };
   window.addEventListener('pointerdown', unlockAudioOnGesture, { passive: true });
   window.addEventListener('keydown', unlockAudioOnGesture, { passive: true });
+
+  function placeEdibleBotAheadForTest(): number {
+    if (state.phase !== 'playing') return 0;
+    const playerHead = state.snake[0];
+    if (!playerHead) return 0;
+
+    const botLevel = 3;
+    const segmentCount = targetBotSpineLength(botLevel, false);
+    const heading = normalizeAngle(state.heading);
+    const fx = Math.cos(heading);
+    const fz = Math.sin(heading);
+    const tailDist = 1.5;
+    const headDist = tailDist + (segmentCount - 1) * SEGMENT_SPACING;
+    const safeBound = Math.max(4, state.config.worldRadius - 2.5);
+    const botHead: Vec2 = {
+      x: clamp(playerHead.x + fx * headDist, -safeBound, safeBound),
+      z: clamp(playerHead.z + fz * headDist, -safeBound, safeBound),
+    };
+    const spine = buildStraightSpine(botHead, heading, segmentCount);
+    const prevSpine = spine.map((p) => ({ ...p }));
+    const maxBotId = state.bots.reduce((max, b) => Math.max(max, b.id), 0);
+    const testBot: BotSnake = {
+      id: maxBotId + 1000,
+      name: 'Bot Test Nhí',
+      skin: 'gold_armor',
+      isBoss: false,
+      level: botLevel,
+      maxLevel: botLevel,
+      chompedTicks: 0,
+      bittenSegments: 0,
+      head: botHead,
+      prevHead: { ...botHead },
+      heading,
+      spine,
+      prevSpine,
+      frozenTicks: 16,
+      powerForm: powerFormForSkin('gold_armor'),
+    };
+
+    const farBots = state.bots.filter(
+      (b) =>
+        euclideanDistance(b.head, playerHead) >= 24 &&
+        euclideanDistance(b.head, botHead) >= 24 &&
+        b.spine.every(
+          (seg) =>
+            euclideanDistance(seg, playerHead) >= 22 && euclideanDistance(seg, botHead) >= 22,
+        ),
+    );
+    const nextBots: readonly BotSnake[] = [testBot, ...farBots];
+    const activeBossId =
+      state.activeBossId !== null && nextBots.some((b) => b.id === state.activeBossId)
+        ? state.activeBossId
+        : null;
+    const board = computeLeaderboard({
+      playerName: state.playerName,
+      playerLevel: state.level,
+      bots: nextBots,
+      activeBossId,
+    });
+
+    state = {
+      ...state,
+      targetHeading: null,
+      bots: nextBots,
+      activeBossId,
+      hazards: state.hazards.filter(
+        (h) =>
+          euclideanDistance(h.cell, playerHead) >= 12 && euclideanDistance(h.cell, botHead) >= 12,
+      ),
+      orbs: state.orbs.filter(
+        (o) => !spine.some((seg) => Math.hypot(o.x - seg.x, o.z - seg.z) < 2.0),
+      ),
+      chompStreak: 0,
+      chompStreakTicks: 0,
+      leaderboard: board.leaderboard,
+      playerRank: board.playerRank,
+      crownTarget: board.crownTarget,
+      config: {
+        ...state.config,
+        botCount: Math.max(1, nextBots.length),
+      },
+    };
+    renderer.sync(state);
+    ui.syncState(state);
+    return testBot.spine.length;
+  }
+
+  function placeFrostTargetsAheadForTest(): {
+    readonly botId: number;
+    readonly hazardId: number;
+  } | null {
+    if (state.phase !== 'playing') return null;
+    const playerHead = state.snake[0];
+    if (!playerHead) return null;
+
+    const heading = normalizeAngle(state.heading);
+    const fx = Math.cos(heading);
+    const fz = Math.sin(heading);
+    const px = -fz;
+    const pz = fx;
+    const safeBound = Math.max(4, state.config.worldRadius - 3);
+
+    const botHead: Vec2 = {
+      x: clamp(playerHead.x + px * 4.2 + fx * 1.4, -safeBound, safeBound),
+      z: clamp(playerHead.z + pz * 4.2 + fz * 1.4, -safeBound, safeBound),
+    };
+    const botLevel = 3;
+    const segmentCount = targetBotSpineLength(botLevel, false);
+    const spine = buildStraightSpine(botHead, heading, segmentCount);
+    const prevSpine = spine.map((p) => ({ ...p }));
+    const botId = state.bots.reduce((max, b) => Math.max(max, b.id), 0) + 1001;
+    const frostBot: BotSnake = {
+      id: botId,
+      name: 'Bot Băng Test',
+      skin: 'gold_armor',
+      isBoss: false,
+      level: botLevel,
+      maxLevel: botLevel,
+      chompedTicks: 0,
+      bittenSegments: 0,
+      head: botHead,
+      prevHead: { ...botHead },
+      heading,
+      spine,
+      prevSpine,
+      frozenTicks: 0,
+      powerForm: powerFormForSkin('gold_armor'),
+    };
+
+    const hazardCell: Vec2 = {
+      x: clamp(playerHead.x - px * 4.2 + fx * 1.4, -safeBound, safeBound),
+      z: clamp(playerHead.z - pz * 4.2 + fz * 1.4, -safeBound, safeBound),
+    };
+    const hazardId = state.hazards.reduce((max, h) => Math.max(max, h.id), 0) + 1001;
+    const frostHazard: Hazard = {
+      id: hazardId,
+      cell: hazardCell,
+      prevCell: { ...hazardCell },
+      kind: 'slime',
+      hp: 2,
+      maxHp: 2,
+      frozenTicks: 0,
+      warningTicks: 0,
+    };
+
+    const nextBots: readonly BotSnake[] = [frostBot, ...state.bots];
+    const nextHazards: readonly Hazard[] = [frostHazard, ...state.hazards];
+    const board = computeLeaderboard({
+      playerName: state.playerName,
+      playerLevel: state.level,
+      bots: nextBots,
+      activeBossId: state.activeBossId,
+    });
+
+    state = {
+      ...state,
+      bots: nextBots,
+      hazards: nextHazards,
+      leaderboard: board.leaderboard,
+      playerRank: board.playerRank,
+      crownTarget: board.crownTarget,
+      config: {
+        ...state.config,
+        botCount: Math.max(1, nextBots.length),
+      },
+    };
+    renderer.sync(state);
+    ui.syncState(state);
+    return { botId, hazardId };
+  }
+
+  function spawnQuestForTest(kind?: QuestKind): BrainQuest | null {
+    if (state.phase !== 'playing') return null;
+    const spawned = spawnQuest(state, state.rng, kind);
+    if (!spawned.quest) return null;
+
+    state = {
+      ...state,
+      quest: spawned.quest,
+      rng: spawned.rng,
+    };
+    renderer.sync(state);
+    ui.syncState(state);
+    return spawned.quest;
+  }
+
+  window.__snakeGame = {
+    getState: () => state,
+    placeEdibleBotAheadForTest,
+    placeFrostTargetsAheadForTest,
+    spawnQuestForTest,
+  };
 
   renderer.sync(state);
   ui.syncState(state);
@@ -439,6 +748,7 @@ function bootstrap(): void {
 
   const cleanup = (): void => {
     cancelAnimationFrame(rafId);
+    delete window.__snakeGame;
     window.removeEventListener('pointerdown', unlockAudioOnGesture);
     window.removeEventListener('keydown', unlockAudioOnGesture);
     window.removeEventListener('resize', handleResize);
@@ -449,6 +759,7 @@ function bootstrap(): void {
     detachSwipe();
     dualsense.dispose();
     sound.dispose();
+    voice.cancel();
     ui.dispose();
     renderer.dispose();
   };

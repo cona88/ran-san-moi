@@ -54,6 +54,7 @@ describe('storage: settings', () => {
       music: true,
       vibration: true,
       playerName: DEFAULT_PLAYER_NAME,
+      ageProfile: 'age6',
     });
   });
 
@@ -66,6 +67,7 @@ describe('storage: settings', () => {
       music: false,
       vibration: false,
       playerName: 'Công Chúa Bông',
+      ageProfile: 'age9' as const,
     };
     saveSettings(custom);
     expect(loadSettings()).toEqual(custom);
@@ -81,6 +83,7 @@ describe('storage: settings', () => {
       music: true,
       vibration: true,
       playerName: DEFAULT_PLAYER_NAME,
+      ageProfile: 'age6',
     });
   });
 
@@ -109,6 +112,22 @@ describe('storage: settings', () => {
       }),
     );
     expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
+  });
+
+  it('falls back ageProfile to age6 when missing or invalid in old saved JSON', () => {
+    localStorage.setItem(
+      'neonSnakeSettings',
+      JSON.stringify({ mode: 'adventure', difficulty: 'normal' }),
+    );
+    expect(loadSettings().ageProfile).toBe('age6');
+
+    localStorage.setItem('neonSnakeSettings', JSON.stringify({ ageProfile: 'age12' }));
+    expect(loadSettings().ageProfile).toBe('age6');
+  });
+
+  it('round-trips ageProfile = age9', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, ageProfile: 'age9' });
+    expect(loadSettings().ageProfile).toBe('age9');
   });
 });
 

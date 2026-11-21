@@ -119,10 +119,32 @@ export function replenishWorldOrbs(params: {
 
   while (result.length < target) {
     let chosen: Vec2 = { x: 0, z: 0 };
+    const preferLocalSector = params.config.worldRadius > 100 && result.length % 3 === 0;
+    const bound = Math.max(2, params.config.worldRadius - 2.2);
+
     for (let attempt = 0; attempt < 8; attempt++) {
-      const sampled = sampleWorldPos(params.config, rng, 2.2);
-      rng = sampled.rng;
-      chosen = sampled.pos;
+      if (preferLocalSector) {
+        const aDraw = nextFloat(rng);
+        const rDraw = nextFloat(aDraw.next);
+        rng = rDraw.next;
+        const angle = aDraw.value * Math.PI * 2;
+        const dist = minDist + 2 + rDraw.value * 76;
+        const x = Number(
+          Math.max(-bound, Math.min(bound, params.playerHead.x + Math.cos(angle) * dist)).toFixed(
+            2,
+          ),
+        );
+        const z = Number(
+          Math.max(-bound, Math.min(bound, params.playerHead.z + Math.sin(angle) * dist)).toFixed(
+            2,
+          ),
+        );
+        chosen = { x, z };
+      } else {
+        const sampled = sampleWorldPos(params.config, rng, 2.2);
+        rng = sampled.rng;
+        chosen = sampled.pos;
+      }
       const dx = chosen.x - params.playerHead.x;
       const dz = chosen.z - params.playerHead.z;
       if (dx * dx + dz * dz >= minDistSq) break;

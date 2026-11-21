@@ -22,7 +22,7 @@ function makeOrbAhead(state: GameState, dist = 0.6, value = 1, isLoot = false): 
 const head = (s: GameState) => s.snake[0]!;
 
 describe('lifecycle & initialization', () => {
-  it('starts centered at (0, 0) with 10 segments, level 5, default playerName, 170 orbs, and 15 bots', () => {
+  it('starts centered at (0, 0) with 10 segments, level 5, default playerName, 850 orbs, and 60 bots', () => {
     const ready = createInitialState({ seed: 1 });
     expect(ready.phase).toBe('ready');
     expect(ready.playerName).toBe('Bé Tiên');
@@ -35,8 +35,8 @@ describe('lifecycle & initialization', () => {
     expect(ready.orbs).toHaveLength(DEFAULT_CONFIG.orbTargetCount);
     expect(ready.bots).toHaveLength(DEFAULT_CONFIG.botCount);
     expect(ready.boosters.level.charges).toBe(1);
-    expect(ready.boosters.speed.charges).toBe(1);
-    expect(ready.boosters.magnet.charges).toBe(1);
+    expect(ready.boosters.speed.charges).toBe(2);
+    expect(ready.boosters.magnet.charges).toBe(2);
 
     const playing = reduce(ready, { type: 'start', playerName: 'Bông Hoa' });
     expect(playing.phase).toBe('playing');
@@ -188,5 +188,51 @@ describe('determinism across seeds', () => {
       heads.add(`${b.x.toFixed(2)},${b.z.toFixed(2)}`);
     }
     expect(heads.size).toBeGreaterThan(1);
+  });
+});
+
+describe('5-minute play session & 5x world completion', () => {
+  it('completes cleanly with won=true when elapsedTicks reaches 5 minutes (6000 ticks)', () => {
+    const base = start({ seed: 7 });
+    expect(base.config.worldRadius).toBe(280);
+    expect(base.config.maxGrid).toBe(560);
+    expect(base.config.sessionDurationMs).toBe(300_000);
+
+    const beforeEnd = {
+      ...base,
+      bots: [],
+      hazards: [],
+      elapsedTicks: 5999,
+      score: 1200,
+      best: 1200,
+    };
+    const ended = reduce(beforeEnd, { type: 'tick' });
+    expect(ended.elapsedTicks).toBe(6000);
+    expect(ended.phase).toBe('gameover');
+    expect(ended.won).toBe(true);
+    expect(ended.eatenByBotName).toBeNull();
+    expect(ended.score).toBeGreaterThan(1200);
+    expect(ended.best).toBe(ended.score);
+    const goEvent = ended.events.find((e) => e.kind === 'gameover');
+    expect(goEvent?.messageVi).toContain('5 Phút');
+  });
+
+  it('respects custom sessionDurationMs tick-by-tick without ending early', () => {
+    let s = start({
+      seed: 3,
+      config: { ...DEFAULT_CONFIG, sessionDurationMs: 250 }, // 5 ticks at 50ms
+    });
+    s = { ...s, bots: [], hazards: [] };
+
+    for (let t = 0; t < 4; t++) {
+      s = reduce(s, { type: 'tick' });
+      expect(s.phase).toBe('playing');
+      expect(s.won).toBe(false);
+    }
+
+    s = reduce(s, { type: 'tick' });
+    expect(s.elapsedTicks).toBe(5);
+    expect(s.phase).toBe('gameover');
+    expect(s.won).toBe(true);
   });
 });

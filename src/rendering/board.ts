@@ -64,7 +64,7 @@ export class Board {
     const floorSpan = isHoneycomb ? Math.max(size + 6, 118) : size + 4;
 
     this.floorTexture = isHoneycomb
-      ? this.createHoneycombTexture(palette)
+      ? this.createHoneycombTexture(floorSpan, palette)
       : this.createTileTexture(size, palette);
 
     this.floor = new Mesh(
@@ -81,7 +81,7 @@ export class Board {
     this.group.add(this.floor);
 
     if (palette.gridOpacity > 0) {
-      const divisions = Math.max(12, Math.min(size, 56));
+      const divisions = Math.max(12, Math.min(Math.round(size / 2), 280));
       this.grid = new GridHelper(size, divisions, palette.gridCenter, palette.gridLine);
       const gridMat = this.grid.material as LineBasicMaterial;
       gridMat.transparent = true;
@@ -242,7 +242,7 @@ export class Board {
 
     const pillarGeo = new OctahedronGeometry(0.55, 0);
     const offset = half + thickness / 2;
-    const steps = 6;
+    const steps = Math.min(28, Math.max(6, Math.round(size / 20)));
     for (let i = 0; i <= steps; i++) {
       const t = -offset + (i / steps) * (offset * 2);
       const isCorner = i === 0 || i === steps;
@@ -305,7 +305,7 @@ export class Board {
     });
     this.railMaterials.push(starMat);
     const starGeo = new OctahedronGeometry(0.42, 0);
-    const steps = 6;
+    const steps = Math.min(28, Math.max(6, Math.round(size / 20)));
     for (let i = 0; i <= steps; i++) {
       const t = -half + (i / steps) * size;
       const isCorner = i === 0 || i === steps;
@@ -331,9 +331,9 @@ export class Board {
 
   /**
    * 512×512 seamless hexagonal honeycomb texture (`#e3b57d` lines on `#fbead1`),
-   * repeated `24×24` times across the 118×118 open arena floor.
+   * scaled proportionally to `floorSpan` so cells keep consistent size on 560×560 worlds.
    */
-  private createHoneycombTexture(palette: ThemePalette): CanvasTexture {
+  private createHoneycombTexture(floorSpan: number, palette: ThemePalette): CanvasTexture {
     const dim = 512;
     const canvas = document.createElement('canvas');
     canvas.width = dim;
@@ -385,11 +385,12 @@ export class Board {
       }
     }
 
+    const repeats = Math.max(12, Math.round((floorSpan / 118) * 24));
     const texture = new CanvasTexture(canvas);
     texture.colorSpace = SRGBColorSpace;
     texture.wrapS = RepeatWrapping;
     texture.wrapT = RepeatWrapping;
-    texture.repeat.set(24, 24);
+    texture.repeat.set(repeats, repeats);
     texture.anisotropy = 4;
     texture.needsUpdate = true;
     return texture;

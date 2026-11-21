@@ -1,4 +1,4 @@
-import type { BoosterKind, SnakeForm } from '../core/types';
+import type { BoosterKind, FairySkillKind, SnakeForm } from '../core/types';
 import type { ControlHandlers } from './controls';
 
 const DIRECTION_CODES = new Set([
@@ -25,7 +25,23 @@ const KEY_TO_BOOSTER: Readonly<Record<string, BoosterKind>> = {
   KeyC: 'magnet',
 };
 
+const KEY_TO_FAIRY_SKILL: Readonly<Record<string, FairySkillKind>> = {
+  KeyV: 'flower',
+  Digit5: 'flower',
+  KeyN: 'thunder',
+  Digit7: 'thunder',
+  KeyG: 'fire',
+  Digit8: 'fire',
+  KeyH: 'water',
+  Digit9: 'water',
+  KeyJ: 'arcane',
+  Digit0: 'arcane',
+  KeyM: 'arcane',
+};
+
+const BUTTERFLY_HOLD_CODES = new Set(['KeyB', 'Digit6']);
 const DASH_CODES = new Set(['ShiftLeft', 'ShiftRight', 'KeyK']);
+const HOLD_SPRAY_INTERVAL_MS = 150;
 
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -36,8 +52,25 @@ function isEditableTarget(target: EventTarget | null): boolean {
 /** Wire macOS-friendly 8-way keyboard controls to the semantic handlers. Returns a disposer. */
 export function attachKeyboard(handlers: ControlHandlers): () => void {
   const pressedDashKeys = new Set<string>();
+  const pressedButterflyKeys = new Set<string>();
   const pressedDirectionKeys = new Set<string>();
   let lastSteerAngle: number | null = null;
+  let sprayInterval: ReturnType<typeof setInterval> | null = null;
+
+  const stopSpray = (): void => {
+    if (sprayInterval !== null) {
+      clearInterval(sprayInterval);
+      sprayInterval = null;
+    }
+  };
+
+  const startSpray = (): void => {
+    if (sprayInterval !== null) return;
+    handlers.shoot();
+    sprayInterval = setInterval(() => {
+      handlers.shoot();
+    }, HOLD_SPRAY_INTERVAL_MS);
+  };
 
   const syncDirectionSteer = (): void => {
     let dx = 0;
@@ -69,6 +102,12 @@ export function attachKeyboard(handlers: ControlHandlers): () => void {
     handlers.setDash(false);
   };
 
+  const releaseButterflyHold = (): void => {
+    if (pressedButterflyKeys.size === 0) return;
+    pressedButterflyKeys.clear();
+    handlers.setButterflyHold(false);
+  };
+
   const onKeyDown = (event: KeyboardEvent): void => {
     if (isEditableTarget(event.target)) return;
     // Preserve macOS system/browser shortcuts such as Cmd+R, Cmd+W, Cmd+Q.
@@ -95,15 +134,25 @@ export function attachKeyboard(handlers: ControlHandlers): () => void {
       return;
     }
 
+    if (BUTTERFLY_HOLD_CODES.has(code)) {
+      event.preventDefault();
+      if (!event.repeat && !pressedButterflyKeys.has(code)) {
+        const wasEmpty = pressedButterflyKeys.size === 0;
+        pressedButterflyKeys.add(code);
+        if (wasEmpty) handlers.setButterflyHold(true);
+      }
+      return;
+    }
+
     if (code === 'Enter') {
       event.preventDefault();
       if (!event.repeat) handlers.primary();
       return;
     }
 
-    if (code === 'Space' || code === 'KeyJ') {
+    if (code === 'Space') {
       event.preventDefault();
-      if (!event.repeat) handlers.shoot();
+      if (!event.repeat) startSpray();
       return;
     }
 
@@ -138,6 +187,13 @@ export function attachKeyboard(handlers: ControlHandlers): () => void {
       return;
     }
 
+    const fairySkill = KEY_TO_FAIRY_SKILL[code];
+    if (fairySkill) {
+      event.preventDefault();
+      if (!event.repeat) handlers.castFairySkill(fairySkill);
+      return;
+    }
+
     const form = KEY_TO_FORM[code];
     if (form) {
       event.preventDefault();
@@ -148,6 +204,11 @@ export function attachKeyboard(handlers: ControlHandlers): () => void {
   const onKeyUp = (event: KeyboardEvent): void => {
     const { code } = event;
 
+    if (code === 'Space') {
+      stopSpray();
+      return;
+    }
+
     if (pressedDirectionKeys.delete(code)) {
       syncDirectionSteer();
     }
@@ -155,11 +216,17 @@ export function attachKeyboard(handlers: ControlHandlers): () => void {
     if (pressedDashKeys.delete(code) && pressedDashKeys.size === 0) {
       handlers.setDash(false);
     }
+
+    if (pressedButterflyKeys.delete(code) && pressedButterflyKeys.size === 0) {
+      handlers.setButterflyHold(false);
+    }
   };
 
   const onBlur = (): void => {
     releaseDirections();
     releaseDash();
+    releaseButterflyHold();
+    stopSpray();
   };
 
   window.addEventListener('keydown', onKeyDown);
@@ -172,5 +239,7 @@ export function attachKeyboard(handlers: ControlHandlers): () => void {
     window.removeEventListener('blur', onBlur);
     releaseDirections();
     releaseDash();
+    releaseButterflyHold();
+    stopSpray();
   };
 }

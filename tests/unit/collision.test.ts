@@ -9,18 +9,18 @@ import {
 } from '../../src/core/systems/collision';
 
 describe('collision', () => {
-  const config = DEFAULT_CONFIG; // [-56, 56] at margin 0
+  const config = DEFAULT_CONFIG; // [-280, 280] at margin 0
 
   it('flags coordinates outside the world bounds', () => {
-    expect(hitsWall({ x: -57, z: 0 }, config, 0)).toBe(true);
-    expect(hitsWall({ x: 57, z: 0 }, config, 0)).toBe(true);
-    expect(hitsWall({ x: 0, z: -57 }, config, 0)).toBe(true);
-    expect(hitsWall({ x: 0, z: 57 }, config, 0)).toBe(true);
+    expect(hitsWall({ x: -281, z: 0 }, config, 0)).toBe(true);
+    expect(hitsWall({ x: 281, z: 0 }, config, 0)).toBe(true);
+    expect(hitsWall({ x: 0, z: -281 }, config, 0)).toBe(true);
+    expect(hitsWall({ x: 0, z: 281 }, config, 0)).toBe(true);
   });
 
   it('allows points on and inside the bounds', () => {
-    expect(hitsWall({ x: -56, z: -56 }, config, 0)).toBe(false);
-    expect(hitsWall({ x: 56, z: 56 }, config, 0)).toBe(false);
+    expect(hitsWall({ x: -280, z: -280 }, config, 0)).toBe(false);
+    expect(hitsWall({ x: 280, z: 280 }, config, 0)).toBe(false);
     expect(hitsWall({ x: 0, z: 0 }, config, 0)).toBe(false);
   });
 
@@ -30,7 +30,7 @@ describe('collision', () => {
       { x: -12.5, z: 8.2 },
     ];
     expect(allInsideWalls(inside, config, 0)).toBe(true);
-    expect(allInsideWalls([...inside, { x: 60, z: 5 }], config, 0)).toBe(false);
+    expect(allInsideWalls([...inside, { x: 290, z: 5 }], config, 0)).toBe(false);
     expect(allInsideWalls([], config, 0)).toBe(true);
   });
 

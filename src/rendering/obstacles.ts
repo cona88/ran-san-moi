@@ -65,6 +65,7 @@ export class ObstaclesView {
   private readonly slimeEyeWhiteGeo = new SphereGeometry(0.11, 10, 8);
   private readonly slimePupilGeo = new SphereGeometry(0.06, 8, 6);
   private readonly iceCubeGeo = new RoundedBoxGeometry(0.88, 0.88, 0.88, 2, 0.1);
+  private readonly iceRimGeo = new RoundedBoxGeometry(0.92, 0.92, 0.92, 1, 0.08);
 
   private readonly crystalMainGeo = new ConeGeometry(0.28, 0.95, 6);
   private readonly crystalShardGeo = new ConeGeometry(0.15, 0.56, 5);
@@ -91,11 +92,18 @@ export class ObstaclesView {
   private readonly iceCubeMat = new MeshStandardMaterial({
     color: 0x8ef9ff,
     emissive: 0x38e8ff,
-    emissiveIntensity: 0.45,
+    emissiveIntensity: 0.55,
     transparent: true,
     opacity: 0.56,
-    metalness: 0.1,
-    roughness: 0.12,
+    metalness: 0.12,
+    roughness: 0.1,
+    depthWrite: false,
+  });
+  private readonly iceWireMat = new MeshBasicMaterial({
+    color: 0xe0feff,
+    wireframe: true,
+    transparent: true,
+    opacity: 0.34,
     depthWrite: false,
   });
 
@@ -160,12 +168,14 @@ export class ObstaclesView {
     }
   }
 
-  /** Interpolate moving slimes and animate ice cubes, gates, crystals & meteor warnings. */
+  /** Interpolate moving slimes and animate ice blocks, gates, crystals & meteor warnings. */
   draw(alpha: number, elapsed: number, delta: number): void {
     const a = Math.max(0, Math.min(1, alpha));
+    this.iceCubeMat.emissiveIntensity = 0.52 + 0.26 * Math.sin(elapsed * 6.0);
 
     for (const vis of this.visuals.values()) {
       const h = vis.hazard;
+      const frozen = h.frozenTicks > 0;
 
       if (h.kind === 'slime') {
         const jumpSq =
@@ -182,8 +192,10 @@ export class ObstaclesView {
         );
         vis.group.position.set(this.scratchPos.x, 0, this.scratchPos.z);
 
-        const frozen = h.frozenTicks > 0;
-        if (vis.iceBlock) vis.iceBlock.visible = frozen;
+        if (vis.iceBlock) {
+          vis.iceBlock.visible = frozen;
+          if (frozen) vis.iceBlock.rotation.y = Math.sin(elapsed * 4.2 + h.id) * 0.05;
+        }
 
         if (vis.slimeBodyGroup) {
           if (frozen) {
@@ -209,12 +221,19 @@ export class ObstaclesView {
       const world = cellToWorld(h.cell.x, h.cell.z, this.half, this.scratchPos);
       vis.group.position.set(world.x, 0, world.z);
 
+      if (vis.iceBlock) {
+        vis.iceBlock.visible = frozen;
+        if (frozen) vis.iceBlock.rotation.y = Math.sin(elapsed * 4.2 + h.id) * 0.05;
+      }
+
       if (h.kind === 'crystal' && vis.crystalGroup) {
-        const damaged = h.hp < h.maxHp ? 0.88 + 0.08 * Math.sin(elapsed * 12) : 1;
-        vis.crystalGroup.scale.setScalar(damaged);
-        vis.crystalGroup.rotation.y = Math.sin(elapsed * 0.9 + h.id) * 0.08;
+        if (!frozen) {
+          const damaged = h.hp < h.maxHp ? 0.88 + 0.08 * Math.sin(elapsed * 12) : 1;
+          vis.crystalGroup.scale.setScalar(damaged);
+          vis.crystalGroup.rotation.y = Math.sin(elapsed * 0.9 + h.id) * 0.08;
+        }
       } else if (h.kind === 'element_gate') {
-        if (vis.gateCore) {
+        if (vis.gateCore && !frozen) {
           vis.gateCore.rotation.y += delta * 2.2;
           vis.gateCore.position.y = 0.14 + Math.sin(elapsed * 3.5 + h.id) * 0.08;
         }
@@ -226,20 +245,30 @@ export class ObstaclesView {
         if (vis.warningGroup) vis.warningGroup.visible = isWarning;
         if (vis.meteorRock) vis.meteorRock.visible = !isWarning;
 
+        if (vis.iceBlock) {
+          if (isWarning) {
+            vis.iceBlock.position.y = -0.34;
+            vis.iceBlock.scale.set(1.22, 0.34, 1.22);
+          } else {
+            vis.iceBlock.position.y = 0.06;
+            vis.iceBlock.scale.set(1.12, 1.12, 1.12);
+          }
+        }
+
         if (isWarning) {
           const flashRate = h.warningTicks <= 1 ? 16 : 9;
-          const flash = 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(elapsed * flashRate));
+          const flash = frozen ? 0.45 : 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(elapsed * flashRate));
           if (vis.warningRingMat) vis.warningRingMat.opacity = 0.5 + 0.45 * flash;
           if (vis.warningFillMat) vis.warningFillMat.opacity = 0.15 + 0.35 * flash;
-          if (vis.warningGroup) {
+          if (vis.warningGroup && !frozen) {
             const ringScale = 0.92 + 0.14 * Math.sin(elapsed * flashRate);
             vis.warningGroup.scale.set(ringScale, 1, ringScale);
           }
-          if (vis.meteorShadow) {
+          if (vis.meteorShadow && !frozen) {
             vis.meteorShadow.position.y = 0.8 + h.warningTicks * 0.9;
             vis.meteorShadow.rotation.y += delta * 4;
           }
-        } else if (vis.meteorRock) {
+        } else if (vis.meteorRock && !frozen) {
           vis.meteorRock.rotation.y += delta * 1.2;
           vis.meteorRock.rotation.x += delta * 0.7;
           vis.meteorRock.position.y = 0.06 + Math.sin(elapsed * 4 + h.id) * 0.05;
@@ -259,6 +288,7 @@ export class ObstaclesView {
     this.slimeEyeWhiteGeo.dispose();
     this.slimePupilGeo.dispose();
     this.iceCubeGeo.dispose();
+    this.iceRimGeo.dispose();
     this.crystalMainGeo.dispose();
     this.crystalShardGeo.dispose();
     this.gatePillarGeo.dispose();
@@ -273,6 +303,7 @@ export class ObstaclesView {
     this.eyeWhiteMat.dispose();
     this.slimePupilMat.dispose();
     this.iceCubeMat.dispose();
+    this.iceWireMat.dispose();
     this.crystalMat.dispose();
     this.crystalTipMat.dispose();
     this.meteorRockMat.dispose();
@@ -302,9 +333,7 @@ export class ObstaclesView {
         slimeBody.add(pupil);
       }
 
-      const iceBlock = new Mesh(this.iceCubeGeo, this.iceCubeMat);
-      iceBlock.position.y = 0.02;
-      iceBlock.visible = h.frozenTicks > 0;
+      const iceBlock = this.makeIceBlock(h.frozenTicks > 0, 1, 1, 1, 0.02);
       group.add(slimeBody, iceBlock);
       vis.slimeBodyGroup = slimeBody;
       vis.iceBlock = iceBlock;
@@ -325,8 +354,10 @@ export class ObstaclesView {
         shard.rotation.set(s.rx, 0, s.rz);
         crystalGroup.add(shard);
       }
-      group.add(crystalGroup);
+      const iceBlock = this.makeIceBlock(h.frozenTicks > 0, 1.06, 1.22, 1.06, 0.06);
+      group.add(crystalGroup, iceBlock);
       vis.crystalGroup = crystalGroup;
+      vis.iceBlock = iceBlock;
     } else if (h.kind === 'element_gate') {
       const form = h.requiredForm ?? 'dragon';
       const meta = FORM_METADATA[form];
@@ -366,10 +397,12 @@ export class ObstaclesView {
       sprite.scale.set(1.36, 0.85, 1);
       sprite.renderOrder = 12;
 
-      group.add(leftPillar, rightPillar, beam, core, sprite);
+      const iceBlock = this.makeIceBlock(h.frozenTicks > 0, 1.26, 1.24, 0.68, 0.12);
+      group.add(leftPillar, rightPillar, beam, core, sprite, iceBlock);
       vis.gateCore = core;
       vis.gateSprite = sprite;
       vis.gateSpriteMat = spriteMat;
+      vis.iceBlock = iceBlock;
     } else {
       // Meteor: floor warning circle during warningTicks > 0, rock after landing.
       const warningGroup = new Group();
@@ -408,16 +441,31 @@ export class ObstaclesView {
       warningGroup.visible = isWarning;
       meteorRock.visible = !isWarning;
 
-      group.add(warningGroup, meteorRock);
+      const iceBlock = isWarning
+        ? this.makeIceBlock(h.frozenTicks > 0, 1.22, 0.34, 1.22, -0.34)
+        : this.makeIceBlock(h.frozenTicks > 0, 1.12, 1.12, 1.12, 0.06);
+
+      group.add(warningGroup, meteorRock, iceBlock);
       vis.warningGroup = warningGroup;
       vis.warningRingMat = warningRingMat;
       vis.warningFillMat = warningFillMat;
       vis.meteorShadow = meteorShadow;
       vis.meteorRock = meteorRock;
+      vis.iceBlock = iceBlock;
     }
 
     this.root.add(group);
     return vis;
+  }
+
+  private makeIceBlock(visible: boolean, sx: number, sy: number, sz: number, y: number): Mesh {
+    const block = new Mesh(this.iceCubeGeo, this.iceCubeMat);
+    const rim = new Mesh(this.iceRimGeo, this.iceWireMat);
+    block.add(rim);
+    block.scale.set(sx, sy, sz);
+    block.position.y = y;
+    block.visible = visible;
+    return block;
   }
 
   private disposeHazardVisual(vis: HazardVisual): void {

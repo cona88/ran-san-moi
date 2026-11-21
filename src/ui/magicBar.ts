@@ -11,10 +11,10 @@ const FORM_SHORT_NAMES: Record<SnakeForm, string> = {
 };
 
 const FORM_WEAPON_SHORT: Record<SnakeForm, string> = {
-  dragon: 'Đạn Sao Băng',
-  phoenix: 'Sóng Băng 3 Tia',
-  unicorn: 'Tia Chớp Tự Tìm',
-  spirit: 'Bom Hoa Nở',
+  dragon: '🔥 Phun Lửa',
+  phoenix: '❄️ Phun Băng',
+  unicorn: '🌊 Phun Nước',
+  spirit: '🕸️ Phun Tơ',
 };
 
 /**
@@ -34,6 +34,14 @@ export class MagicBar {
   private lastForm: SnakeForm | null = null;
   private lastDashKey = '';
   private lastShieldKey = '';
+  private lastSprayActive = false;
+  private lastButterflyFlying = false;
+  private lastButterflyHolding = false;
+  private lastShieldActive = false;
+  private readonly flashTimers = new Map<
+    HTMLElement,
+    { readonly cls: string; readonly timer: ReturnType<typeof setTimeout> }
+  >();
 
   constructor(
     parent: HTMLElement,
@@ -61,6 +69,7 @@ export class MagicBar {
           el('div', { className: 'form-weapon', text: FORM_WEAPON_SHORT[form] }),
         ),
       );
+      btn.dataset['form'] = form;
       btn.style.setProperty('--form-color', meta.cssColor);
       btn.addEventListener('click', () => {
         this.callbacks.onSelectForm(form);
@@ -107,13 +116,41 @@ export class MagicBar {
   }
 
   syncState(state: GameState): void {
-    if (state.form !== this.lastForm) {
+    const isSpraying = state.sprayActiveTicks > 0 && state.phase === 'playing';
+    const formChanged = state.form !== this.lastForm;
+
+    if (formChanged) {
+      const wasInitialized = this.lastForm !== null;
       this.lastForm = state.form;
+      this.rootEl.style.setProperty('--active-form-color', FORM_METADATA[state.form].cssColor);
       for (const [form, btn] of this.formButtons) {
         const active = form === state.form;
         btn.classList.toggle('active', active);
         btn.setAttribute('aria-pressed', String(active));
+        btn.classList.toggle('spraying', active && isSpraying);
+        if (active && wasInitialized) {
+          this.flashClass(btn, 'just-activated', 360);
+        }
       }
+    }
+
+    if (isSpraying !== this.lastSprayActive || (formChanged && isSpraying)) {
+      this.lastSprayActive = isSpraying;
+      this.rootEl.classList.toggle('spraying', isSpraying);
+      for (const [form, btn] of this.formButtons) {
+        btn.classList.toggle('spraying', isSpraying && form === state.form);
+      }
+    }
+
+    const isFlying = state.butterflyStage === 'butterfly' && state.phase === 'playing';
+    if (isFlying !== this.lastButterflyFlying) {
+      this.lastButterflyFlying = isFlying;
+      this.rootEl.classList.toggle('butterfly-flying', isFlying);
+    }
+    const isHoldingButterfly = state.butterflyHold && state.phase === 'playing';
+    if (isHoldingButterfly !== this.lastButterflyHolding) {
+      this.lastButterflyHolding = isHoldingButterfly;
+      this.rootEl.classList.toggle('is-holding', isHoldingButterfly);
     }
 
     const energyRounded = Math.round(state.dashEnergy);
@@ -140,9 +177,63 @@ export class MagicBar {
         this.shieldText.textContent = 'Sẵn sàng ✨';
       }
     }
+    const shieldActive = state.shieldTicks > 0;
+    if (shieldActive && !this.lastShieldActive) {
+      this.flashClass(this.shieldBox, 'just-activated', 360);
+    }
+    this.lastShieldActive = shieldActive;
+  }
+
+  /** Pulse a morph card for immediate DualSense / keyboard press feedback. */
+  flashForm(form?: SnakeForm): void {
+    const target = this.formButtons.get(form ?? this.lastForm ?? 'dragon');
+    if (target) {
+      this.flashClass(target, 'just-activated', 320);
+    }
+  }
+
+  /** Pulse the active weapon card & bar when elemental spray fires. */
+  flashSpray(form?: SnakeForm): void {
+    const activeForm = form ?? this.lastForm ?? 'dragon';
+    this.rootEl.style.setProperty('--active-form-color', FORM_METADATA[activeForm].cssColor);
+    this.flashClass(this.rootEl, 'spray-pulse', 240);
+    const target = this.formButtons.get(activeForm);
+    if (target) {
+      this.flashClass(target, 'just-activated', 240);
+    }
+  }
+
+  /** Pulse the dash meter when Dash (✕ / L2 / Shift) is pressed. */
+  flashDash(): void {
+    this.flashClass(this.dashBox, 'just-activated', 260);
+  }
+
+  /** Pulse the shield meter when Bubble Shield (○ / F) is pressed. */
+  flashShield(): void {
+    this.flashClass(this.shieldBox, 'just-activated', 320);
   }
 
   dispose(): void {
+    for (const entry of this.flashTimers.values()) {
+      clearTimeout(entry.timer);
+    }
+    this.flashTimers.clear();
     this.rootEl.remove();
+  }
+
+  private flashClass(node: HTMLElement, className: string, durationMs: number): void {
+    const prev = this.flashTimers.get(node);
+    if (prev) {
+      clearTimeout(prev.timer);
+      node.classList.remove(prev.cls);
+    }
+    node.classList.remove(className);
+    void node.offsetWidth;
+    node.classList.add(className);
+    const timer = setTimeout(() => {
+      node.classList.remove(className);
+      this.flashTimers.delete(node);
+    }, durationMs);
+    this.flashTimers.set(node, { cls: className, timer });
   }
 }

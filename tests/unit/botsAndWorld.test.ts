@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BOT_SPEED_SCALE,
+  SEGMENT_SPACING,
+  chompBotByPlayer,
   createInitialState,
+  effectiveBotSpineLength,
   getMagnetRadius,
   reduce,
   shootCooldownForForm,
+  shrinkOrEliminateHelper,
+  stepBots,
+  targetBotSpineLength,
   xpThresholdForLevel,
   type BotSnake,
   type GameState,
@@ -69,8 +76,11 @@ describe('Open-world orbs, XP leveling & Magnet radius tiers', () => {
     expect(s.events.some((e) => e.kind === 'level_up')).toBe(true);
   });
 
-  it('scales magnetRadius across default, unicorn form, absorbed unicorn, and magnet booster', () => {
-    let s = startPlaying({ seed: 1 });
+  it('scales magnetRadius across age6, age9 default, unicorn form, absorbed unicorn, and magnet booster', () => {
+    const age6State = startPlaying({ seed: 1, ageProfile: 'age6' });
+    expect(getMagnetRadius(age6State)).toBe(2.05);
+
+    let s = startPlaying({ seed: 1, ageProfile: 'age9' });
     expect(getMagnetRadius(s)).toBe(1.45);
 
     s = reduce(s, { type: 'morph', form: 'unicorn' });
@@ -93,9 +103,18 @@ describe('Open-world orbs, XP leveling & Magnet radius tiers', () => {
 });
 
 describe('Eating weaker Bots, AbsorbedBotPower, and 3-Bot booster bonus', () => {
-  it('eats a bot with level <= player.level, scatters 8..16 loot orbs, gains levels, and absorbs power', () => {
+  it('finishes a 1-segment remaining bot in one tick, scatters 8..16 loot orbs, gains levels, and absorbs power', () => {
     let s = startPlaying({ seed: 2 });
-    const prey = makeBot({ id: 501, level: 4, skin: 'dragon', powerForm: 'dragon' });
+    const prey = makeBot({
+      id: 501,
+      level: 4,
+      maxLevel: 4,
+      bittenSegments: 12,
+      skin: 'dragon',
+      powerForm: 'dragon',
+      spine: [{ x: 0.42, z: 0 }],
+      prevSpine: [{ x: 0.42, z: 0 }],
+    });
     s = { ...s, bots: [prey], orbs: [], botsEaten: 2 }; // next eat is #3 -> bonus booster charge!
 
     const chargesBefore =
@@ -124,6 +143,318 @@ describe('Eating weaker Bots, AbsorbedBotPower, and 3-Bot booster bonus', () => 
     expect(s.shootCooldownMs).toBe(Math.round(shootCooldownForForm('dragon') * 0.5));
   });
 
+  it('chomps a 13-segment Lv.4 bot progressively from tail to head without regrowing segments', () => {
+    let s = startPlaying({ seed: 2 });
+    // Bot moving +X ahead of player: tail at x=0.42, head at x=0.42 + 12 * SEGMENT_SPACING
+    const tailX = 0.42;
+    const spine = Array.from({ length: 13 }, (_, idx) => ({
+      x: tailX + (12 - idx) * SEGMENT_SPACING,
+      z: 0,
+    }));
+    const prey = makeBot({
+      id: 502,
+      level: 4,
+      maxLevel: 4,
+      chompedTicks: 0,
+      bittenSegments: 0,
+      skin: 'dragon',
+      powerForm: 'dragon',
+      head: spine[0]!,
+      prevHead: spine[0]!,
+      heading: 0,
+      spine,
+      prevSpine: spine,
+    });
+    s = { ...s, bots: [prey], orbs: [], botsEaten: 2 };
+
+    // Tick 1: bites 1..3 tail segments, NEVER eats all 13 in one go
+    const xpBefore = s.xp;
+    const scoreBefore = s.score;
+    s = reduce(s, { type: 'tick' });
+
+    const afterBite1 = s.bots.find((b) => b.id === 502)!;
+    expect(afterBite1).toBeDefined();
+    expect(afterBite1.spine.length).toBeGreaterThanOrEqual(10);
+    expect(afterBite1.spine.length).toBeLessThanOrEqual(12);
+    expect(afterBite1.bittenSegments).toBe(13 - afterBite1.spine.length);
+    expect(afterBite1.chompedTicks).toBe(14);
+    expect(afterBite1.maxLevel).toBe(4);
+    expect(effectiveBotSpineLength(afterBite1)).toBe(afterBite1.spine.length);
+    expect(s.botsEaten).toBe(2); // not finished yet
+    expect(s.chompStreak).toBe(13 - afterBite1.spine.length);
+    expect(s.chompStreakTicks).toBe(16);
+    expect(s.score).toBeGreaterThan(scoreBefore);
+    expect(s.xp).toBeGreaterThan(xpBefore);
+
+    const chompEvent = s.events.find((e) => e.kind === 'bot_chomp');
+    expect(chompEvent).toBeDefined();
+    expect(chompEvent?.chompStreak).toBe(s.chompStreak);
+    expect(s.events.some((e) => e.kind === 'bot_eaten')).toBe(false);
+    expect(s.orbs.some((o) => o.isLoot && o.value === 3)).toBe(true);
+
+    // Next tick with player out of bite range: stunned bot slows down and does NOT regrow segments
+    const lenBeforeIdle = afterBite1.spine.length;
+    const prevBotHead = afterBite1.head;
+    const idleStep = stepBots({
+      bots: [afterBite1],
+      orbs: [],
+      playerSnake: [{ x: -30, z: -30 }],
+      playerLevel: s.level,
+      playerProtected: false,
+      playerPhoenixAura: false,
+      config: s.config,
+      rng: s.rng,
+    });
+    const afterIdle = idleStep.bots.find((b) => b.id === 502)!;
+    expect(afterIdle).toBeDefined();
+    expect(afterIdle.spine.length).toBe(lenBeforeIdle);
+    expect(afterIdle.chompedTicks).toBe(13);
+    expect(
+      Math.hypot(afterIdle.head.x - prevBotHead.x, afterIdle.head.z - prevBotHead.z),
+    ).toBeLessThan(s.config.baseSpeed * 0.3);
+
+    // Chase back toward the surviving bot until completely eaten
+    let prevStreak = s.chompStreak;
+    let sawIncreasingStreak = false;
+    for (let t = 0; t < 30 && s.bots.some((b) => b.id === 502); t++) {
+      const target = s.bots.find((b) => b.id === 502)!;
+      const head = s.snake[0]!;
+      const seg = target.spine[target.spine.length - 1] ?? target.head;
+      const angle = Math.atan2(seg.z - head.z, seg.x - head.x);
+      s = reduce(s, { type: 'steer', angle });
+      s = reduce({ ...s, orbs: [] }, { type: 'tick' });
+      if (s.chompStreak > prevStreak) {
+        sawIncreasingStreak = true;
+      }
+      prevStreak = s.chompStreak;
+    }
+
+    expect(sawIncreasingStreak).toBe(true);
+    expect(s.bots.find((b) => b.id === 502)).toBeUndefined();
+    expect(s.botsEaten).toBe(3);
+    expect(s.absorbedPower?.form).toBe('dragon');
+    expect(s.absorbedPower?.ticksRemaining).toBe(160);
+    expect(s.events.some((e) => e.kind === 'bot_eaten')).toBe(true);
+  });
+
+  it('chomps a 13-segment Lv.4 bot progressively from head to tail with smooth spine shift', () => {
+    let s = startPlaying({ seed: 12 });
+    // Bot facing -X at x=0.42 extending rightwards along +X
+    const spine = Array.from({ length: 13 }, (_, idx) => ({
+      x: 0.42 + idx * SEGMENT_SPACING,
+      z: 0,
+    }));
+    const prey = makeBot({
+      id: 503,
+      level: 4,
+      maxLevel: 4,
+      chompedTicks: 0,
+      bittenSegments: 0,
+      head: spine[0]!,
+      prevHead: spine[0]!,
+      heading: Math.PI,
+      spine,
+      prevSpine: spine,
+    });
+    s = { ...s, bots: [prey], orbs: [] };
+
+    const bitCounts: number[] = [];
+    let finished = false;
+    for (let t = 0; t < 20; t++) {
+      const before = s.bots.find((b) => b.id === 503);
+      if (!before) break;
+      const lenBefore = before.spine.length;
+      const target = before.spine[0]!;
+      const pHead = s.snake[0]!;
+      s = reduce(s, { type: 'steer', angle: Math.atan2(target.z - pHead.z, target.x - pHead.x) });
+      s = reduce({ ...s, orbs: [] }, { type: 'tick' });
+
+      const after = s.bots.find((b) => b.id === 503);
+      if (!after) {
+        bitCounts.push(lenBefore);
+        finished = true;
+        break;
+      }
+      const bittenThisTick = lenBefore - after.spine.length;
+      if (bittenThisTick > 0) {
+        bitCounts.push(bittenThisTick);
+        expect(bittenThisTick).toBeLessThanOrEqual(3);
+      }
+      expect(after.prevSpine.length).toBe(after.spine.length);
+      expect(after.head).toEqual(after.spine[0]);
+      for (let i = 1; i < after.spine.length; i++) {
+        const d = Math.hypot(
+          after.spine[i]!.x - after.spine[i - 1]!.x,
+          after.spine[i]!.z - after.spine[i - 1]!.z,
+        );
+        expect(d).toBeLessThanOrEqual(SEGMENT_SPACING + 0.02);
+      }
+    }
+
+    expect(finished).toBe(true);
+    expect(bitCounts.length).toBeGreaterThanOrEqual(4);
+    expect(s.events.some((e) => e.kind === 'bot_eaten')).toBe(true);
+  });
+
+  it('cuts across the middle of a 13-segment bot and smoothly rejoins the remaining spine', () => {
+    let s = startPlaying({ seed: 15 });
+    // Vertical bot at x=0.42 centered around z=0 so player traveling +X slices the middle
+    const spine = Array.from({ length: 13 }, (_, idx) => ({
+      x: 0.42,
+      z: (idx - 6) * SEGMENT_SPACING,
+    }));
+    const prey = makeBot({
+      id: 504,
+      level: 4,
+      maxLevel: 4,
+      head: spine[0]!,
+      prevHead: spine[0]!,
+      heading: -Math.PI / 2,
+      spine,
+      prevSpine: spine,
+    });
+    s = { ...s, bots: [prey], orbs: [] };
+    s = reduce(s, { type: 'tick' });
+
+    const cutBot = s.bots.find((b) => b.id === 504)!;
+    expect(cutBot).toBeDefined();
+    expect(cutBot.spine.length).toBeGreaterThanOrEqual(10);
+    expect(cutBot.spine.length).toBeLessThanOrEqual(12);
+    expect(cutBot.prevSpine.length).toBe(cutBot.spine.length);
+    expect(cutBot.chompedTicks).toBe(14);
+    expect(s.events.some((e) => e.kind === 'bot_chomp')).toBe(true);
+
+    for (let i = 1; i < cutBot.spine.length; i++) {
+      const d = Math.hypot(
+        cutBot.spine[i]!.x - cutBot.spine[i - 1]!.x,
+        cutBot.spine[i]!.z - cutBot.spine[i - 1]!.z,
+      );
+      expect(d).toBeLessThanOrEqual(SEGMENT_SPACING + 1e-3);
+    }
+  });
+
+  it('caps bites at 2 normally, 3 when fast, and decays chompStreak after 16 quiet ticks', () => {
+    let s = startPlaying({ seed: 18 });
+    const spine = Array.from({ length: 13 }, (_, idx) => ({
+      x: 0.42 + idx * 0.25,
+      z: 0,
+    }));
+    const prey = makeBot({
+      id: 505,
+      level: 4,
+      maxLevel: 4,
+      head: spine[0]!,
+      prevHead: spine[0]!,
+      spine,
+      prevSpine: spine,
+    });
+    s = { ...s, bots: [prey], orbs: [] };
+
+    const afterNormal = chompBotByPlayer(s, prey, { x: 0, z: 0 }, { x: 0.5, z: 0 }, false);
+    const preyNormal = afterNormal.bots.find((b) => b.id === 505)!;
+    expect(13 - preyNormal.spine.length).toBe(2);
+    expect(afterNormal.chompStreak).toBe(2);
+    expect(afterNormal.chompStreakTicks).toBe(16);
+
+    const afterFast = chompBotByPlayer(s, prey, { x: 0, z: 0 }, { x: 0.5, z: 0 }, true);
+    const preyFast = afterFast.bots.find((b) => b.id === 505)!;
+    expect(13 - preyFast.spine.length).toBe(3);
+    expect(afterFast.chompStreak).toBe(3);
+    expect(afterFast.chompStreakTicks).toBe(16);
+
+    // Advance 16 quiet ticks -> chompStreak resets to 0
+    let cooled: GameState = { ...afterFast, bots: [], orbs: [] };
+    for (let i = 0; i < 16; i++) {
+      cooled = reduce({ ...cooled, bots: [], orbs: [] }, { type: 'tick' });
+    }
+    expect(cooled.chompStreakTicks).toBe(0);
+    expect(cooled.chompStreak).toBe(0);
+  });
+
+  it('applies bot-vs-bot progressive chomping (max 2 segments/tick) and prevents orb regrowth snap', () => {
+    const base = startPlaying({ seed: 21 });
+    const weakSpine = Array.from({ length: 13 }, (_, idx) => ({
+      x: 10 + idx * SEGMENT_SPACING,
+      z: 10,
+    }));
+    const weakBot = makeBot({
+      id: 510,
+      level: 4,
+      maxLevel: 4,
+      head: weakSpine[0]!,
+      prevHead: weakSpine[0]!,
+      heading: Math.PI,
+      spine: weakSpine,
+      prevSpine: weakSpine,
+    });
+    const strongSpine = Array.from({ length: 18 }, (_, idx) => ({
+      x: 9.8 - idx * SEGMENT_SPACING,
+      z: 10,
+    }));
+    const strongBot = makeBot({
+      id: 511,
+      level: 15,
+      maxLevel: 15,
+      head: strongSpine[0]!,
+      prevHead: strongSpine[0]!,
+      heading: 0,
+      spine: strongSpine,
+      prevSpine: strongSpine,
+    });
+
+    const res = stepBots({
+      bots: [weakBot, strongBot],
+      orbs: [],
+      playerSnake: [{ x: -30, z: -30 }],
+      playerLevel: base.level,
+      playerProtected: false,
+      playerPhoenixAura: false,
+      config: base.config,
+      rng: base.rng,
+    });
+
+    const survivedWeak = res.bots.find((b) => b.id === 510)!;
+    expect(survivedWeak).toBeDefined();
+    expect(survivedWeak.spine.length).toBeGreaterThanOrEqual(11);
+    expect(survivedWeak.spine.length).toBeLessThanOrEqual(12);
+    expect(survivedWeak.chompedTicks).toBe(10);
+    expect(survivedWeak.bittenSegments).toBe(13 - survivedWeak.spine.length);
+    const droppedLoot = res.orbs.filter((o) => o.isLoot && o.value === 3);
+    expect(droppedLoot.length).toBe(survivedWeak.bittenSegments);
+
+    // Eating a level-up orb on a partially bitten bot only grows by at most +1 segment
+    const bittenBot = {
+      ...survivedWeak,
+      level: 5,
+      maxLevel: 5,
+      bittenSegments: 6,
+      spine: survivedWeak.spine.slice(0, 8),
+      prevSpine: survivedWeak.spine.slice(0, 8),
+    };
+    const lootOrb: WorldOrb = {
+      id: 9001,
+      x: bittenBot.head.x,
+      z: bittenBot.head.z,
+      value: 3,
+      colorHex: 0xff6be0,
+      isLoot: true,
+    };
+    const orbRes = stepBots({
+      bots: [bittenBot],
+      orbs: [lootOrb],
+      playerSnake: [{ x: -30, z: -30 }],
+      playerLevel: base.level,
+      playerProtected: false,
+      playerPhoenixAura: false,
+      config: base.config,
+      rng: base.rng,
+    });
+    const grown = orbRes.bots.find((b) => b.id === 510)!;
+    expect(grown.spine.length).toBe(9);
+    expect(grown.bittenSegments).toBeLessThan(6);
+    expect(effectiveBotSpineLength(grown)).toBe(grown.spine.length);
+  });
+
   it('applies absorbed phoenix freeze aura and absorbed spirit shield/heal perk', () => {
     let s = startPlaying({ seed: 3 });
     // Absorbed phoenix freezes nearby bot within radius 4.0
@@ -147,8 +478,16 @@ describe('Eating weaker Bots, AbsorbedBotPower, and 3-Bot booster bonus', () => 
     s = reduce(s, { type: 'tick' });
     expect(s.bots.find((b) => b.id === 601)!.frozenTicks).toBeGreaterThan(0);
 
-    // Eating a spirit bot when missing a heart heals +1 heart and activates >= 80 shieldTicks
-    const spiritPrey = makeBot({ id: 602, level: 3, skin: 'spirit', powerForm: 'spirit' });
+    // Eating a final-segment spirit bot when missing a heart heals +1 heart and activates >= 80 shieldTicks
+    const spiritPrey = makeBot({
+      id: 602,
+      level: 3,
+      maxLevel: 3,
+      skin: 'spirit',
+      powerForm: 'spirit',
+      spine: [{ x: 0.42, z: 0 }],
+      prevSpine: [{ x: 0.42, z: 0 }],
+    });
     s = { ...s, hearts: 2, shieldTicks: 0, bots: [spiritPrey], orbs: [] };
     s = reduce(s, { type: 'tick' });
     expect(s.hearts).toBe(3);
@@ -260,6 +599,51 @@ describe('Boss spawn/defeat, 3 Boosters, Leaderboard & CrownTarget', () => {
     expect(afterBoss.events.some((e) => e.kind === 'boss_defeated')).toBe(true);
   });
 
+  it('chomps a multi-segment Boss progressively before triggering boss_defeated on the last segment', () => {
+    let s = startPlaying({ seed: 25 });
+    const bossSpine = Array.from({ length: 6 }, (_, idx) => ({
+      x: 0.42 + idx * SEGMENT_SPACING,
+      z: 0,
+    }));
+    const boss = makeBot({
+      id: 950,
+      name: 'Đại Vương Rồng',
+      skin: 'gold_armor',
+      isBoss: true,
+      level: 25,
+      maxLevel: 25,
+      head: bossSpine[0]!,
+      prevHead: bossSpine[0]!,
+      heading: Math.PI,
+      spine: bossSpine,
+      prevSpine: bossSpine,
+      powerForm: 'dragon',
+    });
+    s = {
+      ...s,
+      level: 30,
+      bossProgress: 0,
+      activeBossId: boss.id,
+      bots: [boss],
+      orbs: [],
+    };
+
+    const scoreBefore = s.score;
+    const xpBefore = s.xp;
+    s = reduce(s, { type: 'tick' });
+
+    const remainingBoss = s.bots.find((b) => b.id === boss.id)!;
+    expect(remainingBoss).toBeDefined();
+    expect(remainingBoss.spine.length).toBeGreaterThanOrEqual(3);
+    expect(remainingBoss.spine.length).toBeLessThanOrEqual(5);
+    expect(s.activeBossId).toBe(boss.id);
+    expect(s.bossProgress).toBe(0);
+    expect(s.events.some((e) => e.kind === 'bot_chomp')).toBe(true);
+    expect(s.events.some((e) => e.kind === 'boss_defeated')).toBe(false);
+    expect(s.score).toBeGreaterThan(scoreBefore);
+    expect(s.xp).toBeGreaterThan(xpBefore);
+  });
+
   it('activates all 3 boosters (level +10, speed 160 ticks, magnet 200 ticks)', () => {
     let s = startPlaying({ seed: 6 });
     const levelBefore = s.level;
@@ -274,10 +658,14 @@ describe('Boss spawn/defeat, 3 Boosters, Leaderboard & CrownTarget', () => {
 
     s = reduce(s, { type: 'activate_booster', booster: 'speed' });
     expect(s.boosters.speed.activeTicks).toBe(160);
+    expect(s.boosters.speed.charges).toBe(1);
+    s = reduce(s, { type: 'activate_booster', booster: 'speed' });
     expect(s.boosters.speed.charges).toBe(0);
 
     s = reduce(s, { type: 'activate_booster', booster: 'magnet' });
     expect(s.boosters.magnet.activeTicks).toBe(200);
+    expect(s.boosters.magnet.charges).toBe(1);
+    s = reduce(s, { type: 'activate_booster', booster: 'magnet' });
     expect(s.boosters.magnet.charges).toBe(0);
   });
 
@@ -371,10 +759,112 @@ describe('Boss spawn/defeat, 3 Boosters, Leaderboard & CrownTarget', () => {
       }
       expect(s.orbs.length).toBeGreaterThanOrEqual(s.config.orbTargetCount);
       for (const bot of s.bots) {
-        expect(bot.spine.length).toBeGreaterThanOrEqual(7);
+        expect(bot.spine.length).toBeGreaterThanOrEqual(1);
+        expect(bot.spine.length).toBe(bot.prevSpine.length);
+        if ((bot.bittenSegments ?? 0) === 0) {
+          expect(bot.spine.length).toBeGreaterThanOrEqual(7);
+        }
         expect(Number.isFinite(bot.head.x)).toBe(true);
         expect(Number.isFinite(bot.head.z)).toBe(true);
       }
     }
+  });
+
+  it('spawns 60 initial bots, applies BOT_SPEED_SCALE = 0.8, and keeps spine consistent on slash', () => {
+    expect(BOT_SPEED_SCALE).toBe(0.8);
+    const s = startPlaying({ seed: 11 });
+    expect(s.bots).toHaveLength(60);
+    const nearLow = s.bots.filter(
+      (b) => b.level >= 1 && b.level <= 4 && Math.hypot(b.head.x, b.head.z) <= 20.5,
+    );
+    expect(nearLow.length).toBeGreaterThanOrEqual(8);
+
+    // Normal bot moves at baseSpeed * 0.88 * 0.8
+    const normalBot = makeBot({
+      id: 951,
+      level: 10,
+      maxLevel: 10,
+      head: { x: 0, z: 0 },
+      prevHead: { x: 0, z: 0 },
+      heading: 0,
+      spine: Array.from({ length: targetBotSpineLength(10, false) }, (_, idx) => ({
+        x: -idx * SEGMENT_SPACING,
+        z: 0,
+      })),
+    });
+    const stepped = stepBots({
+      bots: [normalBot],
+      orbs: [],
+      playerSnake: [{ x: -40, z: -40 }],
+      playerLevel: 5,
+      playerProtected: true,
+      playerPhoenixAura: false,
+      config: s.config,
+      rng: s.rng,
+    });
+    const moved = stepped.bots[0]!;
+    const distMoved = Math.hypot(moved.head.x - normalBot.head.x, moved.head.z - normalBot.head.z);
+    expect(distMoved).toBeCloseTo(s.config.baseSpeed * 0.88 * BOT_SPEED_SCALE, 3);
+
+    // Boss moves at baseSpeed * 0.92 * 0.8
+    const bossBot = makeBot({
+      id: 952,
+      isBoss: true,
+      level: 30,
+      maxLevel: 30,
+      head: { x: 0, z: 0 },
+      prevHead: { x: 0, z: 0 },
+      heading: 0,
+      spine: Array.from({ length: targetBotSpineLength(30, true) }, (_, idx) => ({
+        x: -idx * SEGMENT_SPACING,
+        z: 0,
+      })),
+    });
+    const bossStepped = stepBots({
+      bots: [bossBot],
+      orbs: [],
+      playerSnake: [{ x: -40, z: -40 }],
+      playerLevel: 5,
+      playerProtected: true,
+      playerPhoenixAura: false,
+      config: s.config,
+      rng: s.rng,
+    });
+    const movedBoss = bossStepped.bots[0]!;
+    const bossDist = Math.hypot(
+      movedBoss.head.x - bossBot.head.x,
+      movedBoss.head.z - bossBot.head.z,
+    );
+    expect(bossDist).toBeCloseTo(s.config.baseSpeed * 0.92 * BOT_SPEED_SCALE, 3);
+
+    // shrinkOrEliminateHelper keeps effectiveBotSpineLength consistent with spine.length when slashed
+    const highBot = makeBot({
+      id: 953,
+      level: 25,
+      maxLevel: 25,
+      head: { x: 5, z: 0 },
+      spine: Array.from({ length: targetBotSpineLength(25, false) }, (_, idx) => ({
+        x: 5 - idx * SEGMENT_SPACING,
+        z: 0,
+      })),
+      prevSpine: Array.from({ length: targetBotSpineLength(25, false) }, (_, idx) => ({
+        x: 5 - idx * SEGMENT_SPACING,
+        z: 0,
+      })),
+    });
+    const slashed = shrinkOrEliminateHelper(highBot, {
+      playerLevel: 5,
+      killMargin: 6,
+      levelDamage: 7,
+      stunTicks: 40,
+      center: { x: 0, z: 0 },
+      knockbackDist: 8,
+      worldRadius: s.config.worldRadius,
+    });
+    expect(slashed.eliminated).toBe(false);
+    expect(slashed.bot.level).toBe(18);
+    expect(slashed.bot.maxLevel).toBe(18);
+    expect(slashed.bot.spine.length).toBe(effectiveBotSpineLength(slashed.bot));
+    expect(slashed.bot.prevSpine.length).toBe(slashed.bot.spine.length);
   });
 });
