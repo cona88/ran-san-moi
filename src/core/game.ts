@@ -63,6 +63,7 @@ import {
   stepBots,
 } from './bots';
 import { castFairySkill, setButterflyHold, stepFairyMagic } from './fairyMagic';
+import { createInitialGuardianFairy, stepGuardianFairy } from './guardianFairy';
 import {
   applyBotShelterFlee,
   createInitialMonsterEvent,
@@ -380,6 +381,8 @@ function freshBoard(
     inShelter: false,
     currentShelterId: null,
     shelteredTicks: 0,
+    shelterHealUsedId: null,
+    guardianFairy: createInitialGuardianFairy(),
   });
 }
 
@@ -503,6 +506,8 @@ export function createInitialState(options: NewGameOptions = {}): GameState {
     inShelter: false,
     currentShelterId: null,
     shelteredTicks: 0,
+    shelterHealUsedId: null,
+    guardianFairy: createInitialGuardianFairy(),
   });
 }
 
@@ -622,6 +627,7 @@ function step(state: GameState): GameState {
   const inShelter = currentShelter !== null;
   const currentShelterId = currentShelter ? currentShelter.id : null;
   const shelteredTicks = inShelter ? state.shelteredTicks + 1 : 0;
+  const movedDist = Math.min(4, Math.hypot(nextHead.x - head.x, nextHead.z - head.z));
 
   const shelterDrafts: EventDraft[] = [];
   if (!state.inShelter && inShelter && currentShelter) {
@@ -654,6 +660,34 @@ function step(state: GameState): GameState {
     });
   }
 
+  let nextHearts = state.hearts;
+  let nextShelterHealUsedId = inShelter ? (state.shelterHealUsedId ?? null) : null;
+  if (
+    inShelter &&
+    currentShelterId !== null &&
+    shelteredTicks === 40 &&
+    nextShelterHealUsedId !== currentShelterId
+  ) {
+    nextShelterHealUsedId = currentShelterId;
+    if (nextHearts < state.maxHearts) {
+      nextHearts = nextHearts + 1;
+      shelterDrafts.push({
+        kind: 'heart_gained',
+        cell: nextHead,
+        messageVi: '🏰 Ánh sáng Lâu Đài hồi tặng bé +1 Tim phép thuật! 💖',
+      });
+    }
+  }
+
+  const shelterDashEnergy =
+    inShelter && shelteredTicks >= 10 && !state.isDashing
+      ? Math.min(100, nextDashEnergy + 2)
+      : nextDashEnergy;
+  const shelterButterflyCharge =
+    inShelter && shelteredTicks >= 10 && state.butterflyStage === 'caterpillar'
+      ? Math.min(100, Number((state.butterflyCharge + 0.5).toFixed(2)))
+      : state.butterflyCharge;
+
   const initialEv = appendEvents([], state.eventSeq, shelterDrafts);
 
   let working: GameState = {
@@ -666,13 +700,15 @@ function step(state: GameState): GameState {
     elapsedTicks: state.elapsedTicks + 1,
     chompStreak: nextChompStreak,
     chompStreakTicks: nextChompStreakTicks,
+    hearts: nextHearts,
     invulnerableTicks: nextInvuln,
     shieldTicks: nextShield,
     shieldCooldownTicks: nextShieldCooldown,
     boosters: nextBoosters,
     absorbedPower: nextAbsorbedPower,
     isDashing: nextIsDashing,
-    dashEnergy: nextDashEnergy,
+    dashEnergy: shelterDashEnergy,
+    butterflyCharge: shelterButterflyCharge,
     sprayActiveTicks: nextSprayActiveTicks,
     bonusFood: nextBonusFood,
     bonusTicks: nextBonusTicks,
@@ -680,6 +716,7 @@ function step(state: GameState): GameState {
     inShelter,
     currentShelterId,
     shelteredTicks,
+    shelterHealUsedId: nextShelterHealUsedId,
     discoveredShelterIds,
     roamingMonsters: state.roamingMonsters ?? createInitialRoamingMonsters(5, config.worldRadius),
     score: state.score + discoveryBonus,
@@ -1082,6 +1119,7 @@ function step(state: GameState): GameState {
 
   working = maybeSpawnQuest(working, working.rng);
   working = stepFairyMagic(working);
+  working = stepGuardianFairy(working, movedDist);
   working = applyDifficultyMagicRecovery(working);
   working = stepSilkWebs(working);
   working = syncSnakeLengthToLevel(working);

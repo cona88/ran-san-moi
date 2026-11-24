@@ -35,6 +35,100 @@ const SHADOW_Y = 0.03; // Crisp ground shadow directly on the terrain (Y = 0.03)
 // Reusable scratch objects (zero GC in draw)
 const VEC_A = new Vector3();
 const COLOR_SCRATCH = new Color();
+const WARM_SHELTER_GOLD = new Color(0xfff0aa);
+
+/** Create a small fluttering silk pennant flag mesh on a golden pole. */
+function createSilkPennant(
+  poleHeight: number,
+  flagColor: number,
+  name: string,
+  poleMat: MeshStandardMaterial,
+): Group {
+  const grp = new Group();
+  const pole = new Mesh(new CylinderGeometry(0.06, 0.08, poleHeight, 8), poleMat);
+  pole.position.y = poleHeight * 0.5;
+  grp.add(pole);
+
+  const finial = new Mesh(new SphereGeometry(0.14, 8, 8), poleMat);
+  finial.position.y = poleHeight;
+  grp.add(finial);
+
+  const flagGeo = new BoxGeometry(1.1, 0.48, 0.06);
+  flagGeo.translate(0.55, 0, 0);
+  const flagMat = new MeshStandardMaterial({
+    color: flagColor,
+    emissive: flagColor,
+    emissiveIntensity: 0.45,
+    roughness: 0.3,
+  });
+  const flag = new Mesh(flagGeo, flagMat);
+  flag.position.set(0.05, poleHeight - 0.3, 0);
+  flag.name = name;
+  grp.add(flag);
+
+  return grp;
+}
+
+/** Create a glowing crystal garden lamppost for castle courtyards. */
+function createGardenLamppost(
+  postMat: MeshStandardMaterial,
+  glowColor: number,
+  height = 2.4,
+): Group {
+  const lamp = new Group();
+  const post = new Mesh(new CylinderGeometry(0.1, 0.16, height, 8), postMat);
+  post.position.y = height * 0.5;
+  lamp.add(post);
+
+  const lantern = new Mesh(
+    new OctahedronGeometry(0.32, 0),
+    new MeshStandardMaterial({
+      color: 0xffffff,
+      emissive: glowColor,
+      emissiveIntensity: 0.9,
+      roughness: 0.15,
+    }),
+  );
+  lantern.position.y = height + 0.22;
+  lamp.add(lantern);
+  return lamp;
+}
+
+/** Create a cute blooming courtyard rose bush cluster. */
+function createCourtyardRoseBush(flowerColor: number): Group {
+  const bush = new Group();
+  const leafMat = new MeshStandardMaterial({
+    color: 0x4caf50,
+    emissive: 0x1b5e20,
+    emissiveIntensity: 0.25,
+    roughness: 0.65,
+  });
+  const mound = new Mesh(new SphereGeometry(0.75, 10, 8), leafMat);
+  mound.scale.set(1.15, 0.78, 1.15);
+  mound.position.y = 0.42;
+  bush.add(mound);
+
+  const roseGeo = new SphereGeometry(0.18, 8, 6);
+  const roseMat = new MeshStandardMaterial({
+    color: flowerColor,
+    emissive: flowerColor,
+    emissiveIntensity: 0.5,
+    roughness: 0.25,
+  });
+  const roseOffsets: readonly [number, number, number][] = [
+    [-0.32, 0.82, 0.28],
+    [0.35, 0.78, 0.22],
+    [0, 0.92, -0.15],
+    [-0.18, 0.72, -0.35],
+    [0.24, 0.7, -0.25],
+  ];
+  for (const [rx, ry, rz] of roseOffsets) {
+    const rose = new Mesh(roseGeo, roseMat);
+    rose.position.set(rx, ry, rz);
+    bush.add(rose);
+  }
+  return bush;
+}
 
 // --- Visual structures for Shelter Houses ---
 
@@ -247,124 +341,374 @@ function createMushroomHouse(shelter: ShelterHouse): Group {
   chimneyCap.position.set(1.7, 6.1, -1.2);
   house.add(chimneyCap);
 
+  // 7. Cozy cobblestone stepping path & fairy garden fence + blooming mini-mushrooms
+  const stoneGeo = new CylinderGeometry(0.58, 0.68, 0.14, 8);
+  const stoneMat = new MeshStandardMaterial({
+    color: 0xffe6f2,
+    emissive: 0x6b4b5d,
+    emissiveIntensity: 0.18,
+    roughness: 0.6,
+  });
+  for (let i = 0; i < 5; i++) {
+    const stone = new Mesh(stoneGeo, stoneMat);
+    stone.position.set(Math.sin(i * 0.7) * 0.45, 0.06, 4.0 + i * 1.25);
+    stone.scale.set(1.1 - i * 0.06, 1, 0.85);
+    house.add(stone);
+  }
+
+  const picketMat = new MeshStandardMaterial({
+    color: 0xfff3e0,
+    emissive: 0xffe0b2,
+    emissiveIntensity: 0.25,
+    roughness: 0.4,
+  });
+  const picketCount = 8;
+  for (let i = 0; i < picketCount; i++) {
+    const angle = (i / picketCount) * Math.PI * 2 + 0.35;
+    if (Math.sin(angle) > 0.75 && Math.abs(Math.cos(angle)) < 0.55) continue;
+    const lamp = createGardenLamppost(picketMat, capColor, 1.35);
+    lamp.position.set(Math.cos(angle) * 6.5, 0, Math.sin(angle) * 6.5);
+    house.add(lamp);
+  }
+
+  const miniCapGeo = new SphereGeometry(0.62, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.52);
+  const miniStemGeo = new CylinderGeometry(0.24, 0.34, 0.75, 10);
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2 + 0.25;
+    const mx = Math.cos(a) * 4.5;
+    const mz = Math.sin(a) * 4.5;
+    if (mz > 3.2 && Math.abs(mx) < 2.2) continue;
+    const ms = new Mesh(miniStemGeo, stemMat);
+    ms.position.set(mx, 0.38, mz);
+    const mc = new Mesh(miniCapGeo, capMat);
+    mc.position.set(mx, 0.76, mz);
+    house.add(ms, mc);
+  }
+
+  const sporeGeo = new SphereGeometry(0.16, 8, 8);
+  const sporeMat = new MeshBasicMaterial({ color: 0xffe6f7, transparent: true, opacity: 0.85 });
+  for (let i = 0; i < 4; i++) {
+    const spore = new Mesh(sporeGeo, sporeMat);
+    spore.position.set(1.7 + Math.sin(i * 1.4) * 0.3, 6.7 + i * 0.55, -1.2 + Math.cos(i) * 0.25);
+    spore.name = `mushroomSpore_${i}`;
+    house.add(spore);
+  }
+
   return house;
 }
 
 /**
- * Creates the 3D geometry for the Central Royal Castle:
- * Grand stone keep, circular battlements, towering central spire crowned with a
- * golden rotating star, 4 flanking turrets with cute cone roofs, and royal arched gateway.
+ * Creates the 3D geometry for the Central Royal Fairytale Citadel:
+ * 3-tier white-marble & rose-gold octagonal plinth, velvet rose carpet runner,
+ * outer curtain wall with 6 bastion towers, 2-tier cathedral keep with stained-glass
+ * windows, 9 soaring spires with fluttering silk flags, rotating golden crown halo
+ * & star finial, and grand royal gatehouse with blooming courtyard rose bushes.
  */
 function createCastleHouse(shelter: ShelterHouse): Group {
   const house = new Group();
   const royalGold = shelter.colorHex;
 
-  // 1. Main Castle Citadel / Keep
-  const keepGeo = new CylinderGeometry(4.4, 4.8, 4.4, 18);
-  const keepMat = new MeshStandardMaterial({
-    color: 0xfdf7ee,
-    emissive: 0x4a3b2c,
+  const marbleMat = new MeshStandardMaterial({
+    color: 0xfffaf3,
+    emissive: 0x523f4f,
     emissiveIntensity: 0.18,
-    roughness: 0.45,
-    metalness: 0.1,
-  });
-  const keep = new Mesh(keepGeo, keepMat);
-  keep.position.y = 1.8;
-  house.add(keep);
-
-  // 2. Parapet / Battlements ring on top of keep
-  const battlementCount = 12;
-  const battlementGeo = new BoxGeometry(0.8, 0.7, 0.45);
-  const battlementMat = new MeshStandardMaterial({ color: 0xf5ebd9, roughness: 0.4 });
-  for (let i = 0; i < battlementCount; i++) {
-    const angle = (i / battlementCount) * Math.PI * 2;
-    const bm = new Mesh(battlementGeo, battlementMat);
-    bm.position.set(Math.cos(angle) * 4.3, 4.25, Math.sin(angle) * 4.3);
-    bm.rotation.y = -angle + Math.PI / 2;
-    house.add(bm);
-  }
-
-  // 3. Central Grand Spire (lavender/royal gold)
-  const spireBaseGeo = new CylinderGeometry(2.4, 2.7, 2.8, 14);
-  const spireBaseMat = new MeshStandardMaterial({
-    color: 0xf0e6ff,
     roughness: 0.35,
+    metalness: 0.12,
   });
-  const spireBase = new Mesh(spireBaseGeo, spireBaseMat);
-  spireBase.position.y = 4.8;
-  house.add(spireBase);
-
-  const spireRoofGeo = new ConeGeometry(2.6, 6.8, 16);
-  const spireRoofMat = new MeshStandardMaterial({
+  const roseGoldMat = new MeshStandardMaterial({
+    color: 0xffd180,
+    emissive: 0xffab40,
+    emissiveIntensity: 0.45,
+    roughness: 0.22,
+    metalness: 0.75,
+  });
+  const royalPurpleRoofMat = new MeshStandardMaterial({
     color: 0x9b51e0,
     emissive: 0x7b2cbf,
+    emissiveIntensity: 0.55,
+    roughness: 0.24,
+    metalness: 0.2,
+  });
+  const rosePinkRoofMat = new MeshStandardMaterial({
+    color: 0xff6b9d,
+    emissive: 0xff4081,
     emissiveIntensity: 0.5,
     roughness: 0.25,
     metalness: 0.15,
   });
-  const spireRoof = new Mesh(spireRoofGeo, spireRoofMat);
-  spireRoof.position.y = 9.4;
+  const periwinkleRoofMat = new MeshStandardMaterial({
+    color: 0x7c8cff,
+    emissive: 0x536dfe,
+    emissiveIntensity: 0.48,
+    roughness: 0.25,
+    metalness: 0.2,
+  });
+  const stainedGlassMat = new MeshBasicMaterial({
+    color: 0xffea78,
+    transparent: true,
+    opacity: 0.92,
+    side: DoubleSide,
+  });
+
+  // 1. 3-Tier Octagonal White-Marble & Rose-Gold Plinth
+  const plinthSpecs: readonly { r: number; h: number; y: number }[] = [
+    { r: 12.0, h: 0.55, y: 0.27 },
+    { r: 10.4, h: 0.5, y: 0.75 },
+    { r: 8.6, h: 0.45, y: 1.2 },
+  ];
+  for (const p of plinthSpecs) {
+    const tier = new Mesh(new CylinderGeometry(p.r, p.r + 0.35, p.h, 8), marbleMat);
+    tier.position.y = p.y;
+    house.add(tier);
+
+    const trim = new Mesh(new TorusGeometry(p.r, 0.09, 6, 32), roseGoldMat);
+    trim.rotation.x = Math.PI / 2;
+    trim.position.y = p.y + p.h * 0.48;
+    house.add(trim);
+  }
+
+  // Inlaid golden courtyard mosaic ring
+  const mosaic = new Mesh(
+    new RingGeometry(5.5, 8.2, 32),
+    new MeshBasicMaterial({
+      color: 0xffe082,
+      transparent: true,
+      opacity: 0.45,
+      side: DoubleSide,
+    }),
+  );
+  mosaic.rotation.x = -Math.PI / 2;
+  mosaic.position.y = 1.45;
+  house.add(mosaic);
+
+  // Velvet rose-pink & gold royal carpet runner extending toward +Z
+  const carpet = new Mesh(
+    new BoxGeometry(2.5, 0.08, 8.2),
+    new MeshStandardMaterial({
+      color: 0xff4081,
+      emissive: 0xd81b60,
+      emissiveIntensity: 0.38,
+      roughness: 0.55,
+    }),
+  );
+  carpet.position.set(0, 1.46, 8.2);
+  house.add(carpet);
+
+  for (const side of [-1, 1] as const) {
+    const carpetBorder = new Mesh(new BoxGeometry(0.18, 0.1, 8.2), roseGoldMat);
+    carpetBorder.position.set(side * 1.26, 1.47, 8.2);
+    house.add(carpetBorder);
+  }
+
+  // 2. Outer Curtain Wall & 6 Perimeter Bastion Towers
+  const bastionAngles = [
+    Math.PI * 0.18,
+    Math.PI * 0.82,
+    Math.PI * 1.08,
+    Math.PI * 1.38,
+    Math.PI * 1.62,
+    Math.PI * 1.92,
+  ];
+  const wallGeo = new BoxGeometry(3.8, 2.3, 0.55);
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    // Leave wide front royal gate avenue open around +Z (a ≈ PI/2)
+    if (Math.sin(a) > 0.72 && Math.abs(Math.cos(a)) < 0.72) continue;
+    const wall = new Mesh(wallGeo, marbleMat);
+    wall.position.set(Math.cos(a) * 9.5, 1.9, Math.sin(a) * 9.5);
+    wall.rotation.y = -a + Math.PI / 2;
+    house.add(wall);
+  }
+
+  let flagIndex = 0;
+  const bastionBodyGeo = new CylinderGeometry(1.15, 1.32, 4.4, 12);
+  const bastionRoofGeo = new ConeGeometry(1.5, 3.2, 12);
+  for (let i = 0; i < bastionAngles.length; i++) {
+    const a = bastionAngles[i]!;
+    const bx = Math.cos(a) * 9.6;
+    const bz = Math.sin(a) * 9.6;
+
+    const tower = new Mesh(bastionBodyGeo, marbleMat);
+    tower.position.set(bx, 2.9, bz);
+    const roof = new Mesh(bastionRoofGeo, i % 2 === 0 ? rosePinkRoofMat : periwinkleRoofMat);
+    roof.position.set(bx, 6.6, bz);
+    house.add(tower, roof);
+
+    const pennant = createSilkPennant(
+      1.6,
+      i % 2 === 0 ? 0xff80ab : 0x80d8ff,
+      `castleFlag_${flagIndex++}`,
+      roseGoldMat,
+    );
+    pennant.position.set(bx, 8.1, bz);
+    house.add(pennant);
+  }
+
+  // Courtyard lampposts & blooming rose bushes along the royal promenade
+  for (const side of [-1, 1] as const) {
+    for (const lz of [6.4, 10.2]) {
+      const lamp = createGardenLamppost(roseGoldMat, 0xffea78, 2.5);
+      lamp.position.set(side * 2.1, 1.4, lz);
+      house.add(lamp);
+    }
+    const bush = createCourtyardRoseBush(side < 0 ? 0xff5ec4 : 0xff85c0);
+    bush.position.set(side * 3.4, 1.4, 6.6);
+    house.add(bush);
+  }
+
+  // 3. Grand 2-Tier Royal Cathedral Keep
+  const lowerKeep = new Mesh(new CylinderGeometry(4.6, 5.1, 5.0, 18), marbleMat);
+  lowerKeep.position.y = 3.8;
+  house.add(lowerKeep);
+
+  const midCornice = new Mesh(new TorusGeometry(4.68, 0.14, 8, 28), roseGoldMat);
+  midCornice.rotation.x = Math.PI / 2;
+  midCornice.position.y = 6.3;
+  house.add(midCornice);
+
+  // Parapet / Battlements ring on top of lower keep
+  const battlementGeo = new BoxGeometry(0.82, 0.72, 0.48);
+  for (let i = 0; i < 14; i++) {
+    const angle = (i / 14) * Math.PI * 2;
+    const bm = new Mesh(battlementGeo, marbleMat);
+    bm.position.set(Math.cos(angle) * 4.5, 6.65, Math.sin(angle) * 4.5);
+    bm.rotation.y = -angle + Math.PI / 2;
+    house.add(bm);
+  }
+
+  // Glowing golden stained-glass windows around lower & upper keep
+  const winPaneGeo = new CircleGeometry(0.45, 14, 0, Math.PI);
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    if (Math.sin(a) > 0.85 && Math.abs(Math.cos(a)) < 0.5) continue;
+    const win = new Mesh(winPaneGeo, stainedGlassMat);
+    win.position.set(Math.cos(a) * 4.85, 4.1, Math.sin(a) * 4.85);
+    win.rotation.y = -a + Math.PI / 2;
+    house.add(win);
+  }
+
+  // Upper Cathedral Keep & Balconies
+  const upperKeep = new Mesh(new CylinderGeometry(3.0, 3.35, 3.8, 16), marbleMat);
+  upperKeep.position.y = 8.2;
+  house.add(upperKeep);
+
+  const upperCornice = new Mesh(new TorusGeometry(3.08, 0.12, 8, 24), roseGoldMat);
+  upperCornice.rotation.x = Math.PI / 2;
+  upperCornice.position.y = 10.1;
+  house.add(upperCornice);
+
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    const win = new Mesh(winPaneGeo, stainedGlassMat);
+    win.scale.setScalar(0.85);
+    win.position.set(Math.cos(a) * 3.16, 8.3, Math.sin(a) * 3.16);
+    win.rotation.y = -a + Math.PI / 2;
+    house.add(win);
+  }
+
+  // 4. Monumental Central Cathedral Spire + Golden Crown Halo + Star Finial
+  const spireRoof = new Mesh(new ConeGeometry(3.35, 8.6, 16), royalPurpleRoofMat);
+  spireRoof.position.y = 14.3;
   house.add(spireRoof);
 
+  for (let i = 0; i < 3; i++) {
+    const band = new Mesh(new TorusGeometry(2.7 - i * 0.72, 0.09, 8, 24), roseGoldMat);
+    band.rotation.x = Math.PI / 2;
+    band.position.y = 11.4 + i * 2.0;
+    house.add(band);
+  }
+
+  // Floating Golden Crown Halo orbiting the spire
+  const crownHaloGroup = new Group();
+  crownHaloGroup.position.y = 17.5;
+  crownHaloGroup.name = 'castleCrownHalo';
+  const haloRing = new Mesh(new TorusGeometry(2.1, 0.08, 8, 28), roseGoldMat);
+  haloRing.rotation.x = Math.PI / 2;
+  crownHaloGroup.add(haloRing);
+  const jewelGeo = new OctahedronGeometry(0.24, 0);
+  const jewelMat = new MeshStandardMaterial({
+    color: 0xff80cc,
+    emissive: 0xff4081,
+    emissiveIntensity: 0.85,
+  });
+  for (let i = 0; i < 6; i++) {
+    const ja = (i / 6) * Math.PI * 2;
+    const jewel = new Mesh(jewelGeo, jewelMat);
+    jewel.position.set(Math.cos(ja) * 2.1, 0, Math.sin(ja) * 2.1);
+    crownHaloGroup.add(jewel);
+  }
+  house.add(crownHaloGroup);
+
   // Golden star finial atop central spire
-  const starGeo = new OctahedronGeometry(0.85, 0);
+  const starGeo = new OctahedronGeometry(1.05, 0);
   const starMat = new MeshStandardMaterial({
     color: royalGold,
     emissive: royalGold,
-    emissiveIntensity: 0.75,
+    emissiveIntensity: 0.85,
     roughness: 0.15,
     metalness: 0.8,
   });
   const starFinial = new Mesh(starGeo, starMat);
-  starFinial.position.y = 13.2;
+  starFinial.position.y = 19.6;
   starFinial.name = 'starFinial';
   house.add(starFinial);
 
-  // 4. 4 Flanking Corner Turrets
+  const centerPennant = createSilkPennant(1.8, 0xffd700, `castleFlag_${flagIndex++}`, roseGoldMat);
+  centerPennant.position.y = 18.6;
+  house.add(centerPennant);
+
+  // 5. 4 Tall Mid-Tier Flanking Corner Turrets
   const turretAngles = [Math.PI * 0.25, Math.PI * 0.75, Math.PI * 1.25, Math.PI * 1.75];
-  const turretBodyGeo = new CylinderGeometry(1.2, 1.35, 3.8, 12);
-  const turretBodyMat = new MeshStandardMaterial({ color: 0xfdf7ee, roughness: 0.4 });
-  const turretRoofGeo = new ConeGeometry(1.55, 3.0, 12);
-  const turretRoofMat = new MeshStandardMaterial({
-    color: 0xff6b8b,
-    emissive: 0xff477e,
-    emissiveIntensity: 0.45,
-    roughness: 0.25,
-  });
+  const turretBodyGeo = new CylinderGeometry(1.25, 1.42, 6.2, 12);
+  const turretRoofGeo = new ConeGeometry(1.65, 3.8, 12);
 
   for (const ta of turretAngles) {
-    const tx = Math.cos(ta) * 4.6;
-    const tz = Math.sin(ta) * 4.6;
+    const tx = Math.cos(ta) * 5.0;
+    const tz = Math.sin(ta) * 5.0;
 
-    const turret = new Mesh(turretBodyGeo, turretBodyMat);
-    turret.position.set(tx, 2.0, tz);
+    const turret = new Mesh(turretBodyGeo, marbleMat);
+    turret.position.set(tx, 4.4, tz);
 
-    const roof = new Mesh(turretRoofGeo, turretRoofMat);
-    roof.position.set(tx, 4.8, tz);
+    const roof = new Mesh(turretRoofGeo, rosePinkRoofMat);
+    roof.position.set(tx, 9.3, tz);
 
-    house.add(turret, roof);
+    const pennant = createSilkPennant(1.5, 0xffd700, `castleFlag_${flagIndex++}`, roseGoldMat);
+    pennant.position.set(tx, 11.1, tz);
+
+    house.add(turret, roof, pennant);
   }
 
-  // 5. Grand Arched Royal Gateway
+  // 6. Grand Arched Royal Gatehouse & Tiara Crest
   const gateGroup = new Group();
-  gateGroup.position.set(0, 0, 4.4);
+  gateGroup.position.set(0, 1.4, 4.8);
 
-  const gateArchGeo = new RingGeometry(1.2, 1.6, 20, 1, 0, Math.PI);
-  const gateArchMat = new MeshBasicMaterial({ color: royalGold, side: DoubleSide });
-  const gateArch = new Mesh(gateArchGeo, gateArchMat);
-  gateArch.position.set(0, 2.4, 0.2);
+  for (const side of [-1, 1] as const) {
+    const pillar = new Mesh(new CylinderGeometry(0.42, 0.48, 3.6, 12), marbleMat);
+    pillar.position.set(side * 1.75, 1.8, 0.2);
+    gateGroup.add(pillar);
+  }
+
+  const gateArch = new Mesh(
+    new RingGeometry(1.4, 1.88, 22, 1, 0, Math.PI),
+    new MeshBasicMaterial({ color: royalGold, side: DoubleSide }),
+  );
+  gateArch.position.set(0, 2.7, 0.25);
   gateGroup.add(gateArch);
 
-  // Portal portal light
-  const gateLightGeo = new CircleGeometry(1.2, 18, 0, Math.PI);
-  const gateLightMat = new MeshBasicMaterial({
-    color: 0xffea78,
-    transparent: true,
-    opacity: 0.88,
-    side: DoubleSide,
-  });
-  const gateLight = new Mesh(gateLightGeo, gateLightMat);
-  gateLight.position.set(0, 2.4, 0.18);
+  const gateCrest = new Mesh(new OctahedronGeometry(0.42, 0), jewelMat);
+  gateCrest.position.set(0, 4.65, 0.3);
+  gateGroup.add(gateCrest);
+
+  const gateLight = new Mesh(
+    new CircleGeometry(1.4, 20, 0, Math.PI),
+    new MeshBasicMaterial({
+      color: 0xffea78,
+      transparent: true,
+      opacity: 0.9,
+      side: DoubleSide,
+    }),
+  );
+  gateLight.position.set(0, 2.7, 0.22);
   gateGroup.add(gateLight);
 
   house.add(gateGroup);
@@ -373,31 +717,47 @@ function createCastleHouse(shelter: ShelterHouse): Group {
 
 /**
  * Creates the 3D geometry for a Crystal Sanctuary:
- * Towering crystalline geode monoliths clustered organically, a floating rotating
- * apex crystal prism bobbing gently, and glowing runic crystalline shards.
+ * Grand stepped hexagonal quartz dais, inner & outer crystalline geode monolith crowns,
+ * floating rotating apex crystal prism bobbing gently with twin counter-rotating golden
+ * rune halos, and glowing runic floor ring.
  */
 function createCrystalSanctuary(shelter: ShelterHouse): Group {
   const house = new Group();
   const crystalColor = shelter.colorHex;
 
+  const daisMat = new MeshStandardMaterial({
+    color: 0xeef7ff,
+    emissive: crystalColor,
+    emissiveIntensity: 0.16,
+    roughness: 0.22,
+    metalness: 0.28,
+  });
+
   const crystalMat = new MeshStandardMaterial({
     color: crystalColor,
     emissive: crystalColor,
-    emissiveIntensity: 0.55,
+    emissiveIntensity: 0.58,
     roughness: 0.12,
     metalness: 0.25,
     transparent: true,
-    opacity: 0.88,
+    opacity: 0.9,
   });
 
-  // Cluster of 6 surrounding crystal monoliths
+  // Grand 2-tier hexagonal quartz dais
+  const daisLower = new Mesh(new CylinderGeometry(8.6, 9.2, 0.55, 6), daisMat);
+  daisLower.position.y = 0.28;
+  const daisUpper = new Mesh(new CylinderGeometry(5.8, 6.4, 0.55, 6), daisMat);
+  daisUpper.position.y = 0.8;
+  house.add(daisLower, daisUpper);
+
+  // Cluster of 6 inner crystal monoliths
   const pillarConfigs = [
-    { r: 2.8, angle: 0.3, height: 5.2, width: 1.1, tiltX: 0.08, tiltZ: -0.06 },
-    { r: 3.2, angle: 1.3, height: 6.4, width: 1.3, tiltX: 0.05, tiltZ: 0.09 },
-    { r: 2.7, angle: 2.4, height: 4.8, width: 1.0, tiltX: -0.07, tiltZ: 0.08 },
-    { r: 3.4, angle: 3.6, height: 6.0, width: 1.25, tiltX: -0.09, tiltZ: -0.05 },
-    { r: 2.9, angle: 4.8, height: 5.6, width: 1.15, tiltX: 0.04, tiltZ: -0.1 },
-    { r: 3.1, angle: 5.8, height: 4.5, width: 1.05, tiltX: 0.08, tiltZ: 0.04 },
+    { r: 2.9, angle: 0.3, height: 6.2, width: 1.15, tiltX: 0.08, tiltZ: -0.06 },
+    { r: 3.3, angle: 1.3, height: 7.4, width: 1.35, tiltX: 0.05, tiltZ: 0.09 },
+    { r: 2.8, angle: 2.4, height: 5.8, width: 1.05, tiltX: -0.07, tiltZ: 0.08 },
+    { r: 3.5, angle: 3.6, height: 7.0, width: 1.3, tiltX: -0.09, tiltZ: -0.05 },
+    { r: 3.0, angle: 4.8, height: 6.6, width: 1.2, tiltX: 0.04, tiltZ: -0.1 },
+    { r: 3.2, angle: 5.8, height: 5.4, width: 1.1, tiltX: 0.08, tiltZ: 0.04 },
   ];
 
   for (const cfg of pillarConfigs) {
@@ -405,39 +765,67 @@ function createCrystalSanctuary(shelter: ShelterHouse): Group {
     const mesh = new Mesh(geo, crystalMat);
     const px = Math.cos(cfg.angle) * cfg.r;
     const pz = Math.sin(cfg.angle) * cfg.r;
-    mesh.position.set(px, cfg.height * 0.5 - 0.2, pz);
+    mesh.position.set(px, cfg.height * 0.5 + 0.6, pz);
     mesh.rotation.set(cfg.tiltX, cfg.angle, cfg.tiltZ);
     house.add(mesh);
   }
 
+  // Outer ring of 8 luminous crystal obelisks
+  const obeliskGeo = new ConeGeometry(0.65, 4.4, 6);
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2 + 0.2;
+    const ob = new Mesh(obeliskGeo, crystalMat);
+    ob.position.set(Math.cos(a) * 7.2, 2.2, Math.sin(a) * 7.2);
+    ob.rotation.set(Math.sin(a) * -0.12, a, Math.cos(a) * 0.12);
+    house.add(ob);
+  }
+
   // Floating giant central crystal prism
-  const apexGeo = new OctahedronGeometry(1.8, 0);
-  apexGeo.scale(0.8, 1.4, 0.8);
+  const apexGeo = new OctahedronGeometry(1.95, 0);
+  apexGeo.scale(0.8, 1.45, 0.8);
   const apexMat = new MeshStandardMaterial({
     color: 0xffffff,
     emissive: crystalColor,
-    emissiveIntensity: 0.85,
+    emissiveIntensity: 0.9,
     roughness: 0.08,
     metalness: 0.35,
     transparent: true,
-    opacity: 0.95,
+    opacity: 0.96,
   });
   const apexMesh = new Mesh(apexGeo, apexMat);
-  apexMesh.position.set(0, 4.6, 0);
+  apexMesh.position.set(0, 5.4, 0);
   apexMesh.name = 'crystalApex';
   house.add(apexMesh);
 
+  // Twin counter-rotating golden rune halos around crystalApex
+  const haloMat = new MeshStandardMaterial({
+    color: 0xffe082,
+    emissive: 0xffd54f,
+    emissiveIntensity: 0.7,
+    metalness: 0.65,
+    roughness: 0.2,
+  });
+  const haloA = new Mesh(new TorusGeometry(2.6, 0.07, 8, 28), haloMat);
+  haloA.position.y = 5.4;
+  haloA.rotation.x = Math.PI * 0.38;
+  haloA.name = 'crystalHaloA';
+  const haloB = new Mesh(new TorusGeometry(2.2, 0.06, 8, 28), haloMat);
+  haloB.position.y = 5.4;
+  haloB.rotation.x = -Math.PI * 0.38;
+  haloB.name = 'crystalHaloB';
+  house.add(haloA, haloB);
+
   // Runic floor ring
-  const runeRingGeo = new RingGeometry(3.6, 4.4, 32);
+  const runeRingGeo = new RingGeometry(4.2, 5.1, 32);
   const runeRingMat = new MeshBasicMaterial({
     color: crystalColor,
     transparent: true,
-    opacity: 0.5,
+    opacity: 0.55,
     side: DoubleSide,
   });
   const runeRing = new Mesh(runeRingGeo, runeRingMat);
   runeRing.rotation.x = -Math.PI / 2;
-  runeRing.position.y = 0.02;
+  runeRing.position.y = 1.09;
   house.add(runeRing);
 
   return house;
@@ -445,8 +833,10 @@ function createCrystalSanctuary(shelter: ShelterHouse): Group {
 
 /**
  * Creates the 3D geometry for Mermaid Palace (Cung Điện Nàng Tiên Cá Đại Dương):
- * Pearlescent conch shell castle citadel, spiraling coral turrets (aquamarine cyan & coral pink),
- * giant glowing pearl dome apex, sparkling water ripples and rising air bubbles.
+ * Tiered mother-of-pearl lagoon platform, monumental sculpted scallop-shell throne fan,
+ * 6 spiraling coral & aquamarine spires with sea-silk ribbons, arched coral bridges,
+ * luminous oyster pavilion cradling the giant glowing pearl & pearl halo,
+ * sparkling water ripples and rising air bubbles.
  */
 export function createMermaidPalace(shelter: ShelterHouse): Group {
   const house = new Group();
@@ -454,155 +844,250 @@ export function createMermaidPalace(shelter: ShelterHouse): Group {
   const coralPink = 0xff6987;
   const pearlGlow = 0xebffff;
 
-  // 1. Conch Shell Citadel Keep
-  const keepGeo = new CylinderGeometry(4.2, 5.0, 4.6, 20);
-  const keepMat = new MeshStandardMaterial({
+  const pearlShellMat = new MeshStandardMaterial({
     color: pearlGlow,
     emissive: 0x00bcd4,
-    emissiveIntensity: 0.22,
-    roughness: 0.25,
-    metalness: 0.35,
+    emissiveIntensity: 0.24,
+    roughness: 0.2,
+    metalness: 0.38,
   });
-  const keep = new Mesh(keepGeo, keepMat);
-  keep.position.y = 1.9;
+  const goldSeaMat = new MeshStandardMaterial({
+    color: 0xffe082,
+    emissive: 0xffd54f,
+    emissiveIntensity: 0.6,
+    metalness: 0.65,
+    roughness: 0.2,
+  });
+
+  // 0. Tiered Mother-of-Pearl Lagoon Platform
+  const lagBase = new Mesh(new CylinderGeometry(10.6, 11.2, 0.5, 28), pearlShellMat);
+  lagBase.position.y = 0.25;
+  const lagMid = new Mesh(new CylinderGeometry(7.8, 8.4, 0.5, 24), pearlShellMat);
+  lagMid.position.y = 0.72;
+  house.add(lagBase, lagMid);
+
+  // 1. Conch Shell Citadel Keep
+  const keep = new Mesh(new CylinderGeometry(4.4, 5.2, 5.2, 20), pearlShellMat);
+  keep.position.y = 3.2;
   house.add(keep);
 
   // Conch shell spiraling ridges
   const ridgeMat = new MeshStandardMaterial({
     color: 0xffffff,
     emissive: cyanAqua,
-    emissiveIntensity: 0.3,
+    emissiveIntensity: 0.34,
     roughness: 0.2,
-    metalness: 0.3,
+    metalness: 0.32,
   });
-  for (let i = 0; i < 3; i++) {
-    const ridgeGeo = new TorusGeometry(4.4 - i * 0.3, 0.22, 8, 24);
-    const ridge = new Mesh(ridgeGeo, ridgeMat);
+  for (let i = 0; i < 4; i++) {
+    const ridge = new Mesh(new TorusGeometry(4.8 - i * 0.32, 0.2, 8, 28), ridgeMat);
     ridge.rotation.x = Math.PI / 2;
-    ridge.position.y = 1.0 + i * 1.3;
+    ridge.position.y = 1.6 + i * 1.25;
     house.add(ridge);
   }
 
+  // Monumental Sculpted Scallop-Shell Throne Fan rising behind the pearl pavilion
+  const shellRibGeo = new SphereGeometry(2.6, 14, 12);
+  shellRibGeo.scale(0.45, 2.2, 0.28);
+  for (let i = -3; i <= 3; i++) {
+    const ribAngle = i * 0.22;
+    const rib = new Mesh(shellRibGeo, i % 2 === 0 ? pearlShellMat : ridgeMat);
+    rib.position.set(Math.sin(ribAngle) * 2.8, 6.8 + Math.cos(ribAngle) * 1.4, -4.4);
+    rib.rotation.z = -ribAngle;
+    rib.rotation.x = -0.18;
+    house.add(rib);
+  }
+
   // Giant glowing pearl dome apex in coral oyster cup
-  const oysterCupGeo = new CylinderGeometry(2.4, 1.8, 1.2, 16);
-  const oysterCupMat = new MeshStandardMaterial({
-    color: coralPink,
-    emissive: 0xff4081,
-    emissiveIntensity: 0.4,
-    roughness: 0.35,
-  });
-  const oysterCup = new Mesh(oysterCupGeo, oysterCupMat);
-  oysterCup.position.y = 4.4;
+  const oysterCup = new Mesh(
+    new CylinderGeometry(2.7, 2.0, 1.35, 18),
+    new MeshStandardMaterial({
+      color: coralPink,
+      emissive: 0xff4081,
+      emissiveIntensity: 0.45,
+      roughness: 0.3,
+    }),
+  );
+  oysterCup.position.y = 6.0;
   house.add(oysterCup);
 
-  const pearlGeo = new SphereGeometry(1.75, 24, 20);
-  const pearlMat = new MeshStandardMaterial({
-    color: 0xffffff,
-    emissive: 0x7ef8ff,
-    emissiveIntensity: 0.82,
-    roughness: 0.12,
-    metalness: 0.45,
-  });
-  const pearl = new Mesh(pearlGeo, pearlMat);
-  pearl.position.y = 6.2;
+  const pearl = new Mesh(
+    new SphereGeometry(1.9, 24, 20),
+    new MeshStandardMaterial({
+      color: 0xffffff,
+      emissive: 0x7ef8ff,
+      emissiveIntensity: 0.85,
+      roughness: 0.1,
+      metalness: 0.45,
+    }),
+  );
+  pearl.position.y = 7.9;
   pearl.name = 'mermaidPearl';
   house.add(pearl);
 
-  // 2. Spiraling coral turrets (4 flanking towers: 2 aquamarine cyan & 2 coral pink)
+  const pearlHalo = new Mesh(new TorusGeometry(2.65, 0.08, 8, 28), goldSeaMat);
+  pearlHalo.position.y = 7.9;
+  pearlHalo.rotation.x = Math.PI * 0.4;
+  pearlHalo.name = 'mermaidPearlHalo';
+  house.add(pearlHalo);
+
+  // 2. 6 Spiraling Coral & Aquamarine Grand Spires + Sea-Silk Ribbons
   const turretConfigs = [
-    { angle: Math.PI * 0.25, color: cyanAqua, emissive: 0x00b4d8 },
-    { angle: Math.PI * 0.75, color: coralPink, emissive: 0xff4081 },
-    { angle: Math.PI * 1.25, color: cyanAqua, emissive: 0x00b4d8 },
-    { angle: Math.PI * 1.75, color: coralPink, emissive: 0xff4081 },
+    {
+      angle: Math.PI * 0.25,
+      radius: 5.0,
+      height: 4.8,
+      coneH: 4.0,
+      color: cyanAqua,
+      emissive: 0x00b4d8,
+    },
+    {
+      angle: Math.PI * 0.75,
+      radius: 5.0,
+      height: 4.8,
+      coneH: 4.0,
+      color: coralPink,
+      emissive: 0xff4081,
+    },
+    {
+      angle: Math.PI * 1.25,
+      radius: 5.0,
+      height: 4.8,
+      coneH: 4.0,
+      color: cyanAqua,
+      emissive: 0x00b4d8,
+    },
+    {
+      angle: Math.PI * 1.75,
+      radius: 5.0,
+      height: 4.8,
+      coneH: 4.0,
+      color: coralPink,
+      emissive: 0xff4081,
+    },
+    {
+      angle: Math.PI * 0.12,
+      radius: 8.6,
+      height: 3.6,
+      coneH: 3.2,
+      color: coralPink,
+      emissive: 0xff4081,
+    },
+    {
+      angle: Math.PI * 0.88,
+      radius: 8.6,
+      height: 3.6,
+      coneH: 3.2,
+      color: cyanAqua,
+      emissive: 0x00b4d8,
+    },
   ];
 
-  for (const t of turretConfigs) {
-    const tx = Math.cos(t.angle) * 4.8;
-    const tz = Math.sin(t.angle) * 4.8;
+  const miniPearlGeo = new SphereGeometry(0.38, 10, 8);
+  const miniPearlMat = new MeshStandardMaterial({
+    color: 0xffffff,
+    emissive: 0x00e5ff,
+    emissiveIntensity: 0.75,
+    roughness: 0.12,
+    metalness: 0.5,
+  });
+
+  for (let i = 0; i < turretConfigs.length; i++) {
+    const t = turretConfigs[i]!;
+    const tx = Math.cos(t.angle) * t.radius;
+    const tz = Math.sin(t.angle) * t.radius;
 
     const turretMat = new MeshStandardMaterial({
       color: t.color,
       emissive: t.emissive,
-      emissiveIntensity: 0.45,
-      roughness: 0.3,
-      metalness: 0.2,
+      emissiveIntensity: 0.48,
+      roughness: 0.28,
+      metalness: 0.22,
     });
 
-    const colGeo = new CylinderGeometry(1.15, 1.35, 3.8, 14);
-    const colMesh = new Mesh(colGeo, turretMat);
-    colMesh.position.set(tx, 1.9, tz);
+    const colMesh = new Mesh(new CylinderGeometry(1.1, 1.32, t.height, 14), turretMat);
+    colMesh.position.set(tx, 0.8 + t.height * 0.5, tz);
 
-    const coneGeo = new ConeGeometry(1.4, 3.6, 14);
-    const coneMesh = new Mesh(coneGeo, turretMat);
-    coneMesh.position.set(tx, 4.8, tz);
+    const coneMesh = new Mesh(new ConeGeometry(1.4, t.coneH, 14), turretMat);
+    coneMesh.position.set(tx, 0.8 + t.height + t.coneH * 0.5, tz);
 
-    const miniPearlGeo = new SphereGeometry(0.35, 10, 8);
-    const miniPearlMat = new MeshStandardMaterial({
-      color: 0xffffff,
-      emissive: 0x00e5ff,
-      emissiveIntensity: 0.7,
-      roughness: 0.15,
-      metalness: 0.5,
-    });
     const miniPearl = new Mesh(miniPearlGeo, miniPearlMat);
-    miniPearl.position.set(tx, 6.7, tz);
+    miniPearl.position.set(tx, 0.8 + t.height + t.coneH + 0.25, tz);
 
-    house.add(colMesh, coneMesh, miniPearl);
+    const ribbon = createSilkPennant(
+      1.3,
+      i % 2 === 0 ? cyanAqua : coralPink,
+      `mermaidRibbon_${i}`,
+      goldSeaMat,
+    );
+    ribbon.position.set(tx, 0.8 + t.height + t.coneH + 0.4, tz);
+
+    house.add(colMesh, coneMesh, miniPearl, ribbon);
   }
 
   // 3. Sparkling water ripples
-  const rippleGeo = new RingGeometry(2.5, 5.0, 32);
-  const rippleMat = new MeshBasicMaterial({
-    color: 0x29b6f6,
-    transparent: true,
-    opacity: 0.45,
-    side: DoubleSide,
-  });
-  const ripples = new Mesh(rippleGeo, rippleMat);
+  const ripples = new Mesh(
+    new RingGeometry(6.8, 10.2, 36),
+    new MeshBasicMaterial({
+      color: 0x29b6f6,
+      transparent: true,
+      opacity: 0.5,
+      side: DoubleSide,
+    }),
+  );
   ripples.rotation.x = -Math.PI / 2;
-  ripples.position.y = 0.02;
+  ripples.position.y = 0.53;
   ripples.name = 'mermaidRipples';
   house.add(ripples);
 
   // 4. Rising air bubbles
   const bubbleCount = 7;
-  const bubbleGeo = new SphereGeometry(0.25, 10, 8);
+  const bubbleGeo = new SphereGeometry(0.28, 10, 8);
   const bubbleMat = new MeshStandardMaterial({
     color: 0xe0f7fa,
     emissive: 0x80deea,
-    emissiveIntensity: 0.65,
+    emissiveIntensity: 0.7,
     roughness: 0.1,
     metalness: 0.3,
     transparent: true,
-    opacity: 0.8,
+    opacity: 0.84,
   });
   for (let i = 0; i < bubbleCount; i++) {
     const bubble = new Mesh(bubbleGeo, bubbleMat);
     const a = (i / bubbleCount) * Math.PI * 2 + 0.3;
-    const r = 1.8 + (i % 3) * 1.1;
-    bubble.position.set(Math.cos(a) * r, 1.5 + i * 0.6, Math.sin(a) * r);
+    const r = 2.4 + (i % 3) * 1.4;
+    bubble.position.set(Math.cos(a) * r, 2.0 + i * 0.7, Math.sin(a) * r);
     bubble.name = `mermaidBubble_${i}`;
     house.add(bubble);
   }
 
-  // 5. Arched seashell gateway
+  // 5. Grand Seashell Archway & Coral Pillars
   const gateGroup = new Group();
-  gateGroup.position.set(0, 0, 4.5);
-  const archGeo = new RingGeometry(1.2, 1.7, 20, 1, 0, Math.PI);
-  const archMat = new MeshBasicMaterial({ color: cyanAqua, side: DoubleSide });
-  const arch = new Mesh(archGeo, archMat);
-  arch.position.set(0, 2.4, 0.2);
+  gateGroup.position.set(0, 0.95, 5.2);
+
+  for (const side of [-1, 1] as const) {
+    const lamp = createGardenLamppost(pearlShellMat, cyanAqua, 2.6);
+    lamp.position.set(side * 2.2, 0, 2.8);
+    gateGroup.add(lamp);
+  }
+
+  const arch = new Mesh(
+    new RingGeometry(1.4, 2.0, 22, 1, 0, Math.PI),
+    new MeshBasicMaterial({ color: cyanAqua, side: DoubleSide }),
+  );
+  arch.position.set(0, 2.6, 0.2);
   gateGroup.add(arch);
 
-  const portalGeo = new CircleGeometry(1.2, 18, 0, Math.PI);
-  const portalMat = new MeshBasicMaterial({
-    color: 0x80deea,
-    transparent: true,
-    opacity: 0.85,
-    side: DoubleSide,
-  });
-  const portal = new Mesh(portalGeo, portalMat);
-  portal.position.set(0, 2.4, 0.18);
+  const portal = new Mesh(
+    new CircleGeometry(1.4, 20, 0, Math.PI),
+    new MeshBasicMaterial({
+      color: 0x80deea,
+      transparent: true,
+      opacity: 0.88,
+      side: DoubleSide,
+    }),
+  );
+  portal.position.set(0, 2.6, 0.18);
   gateGroup.add(portal);
 
   house.add(gateGroup);
@@ -611,137 +1096,242 @@ export function createMermaidPalace(shelter: ShelterHouse): Group {
 
 /**
  * Creates the 3D geometry for Candy Castle (Lâu Đài Kẹo Ngọt Cầu Vồng):
- * Marshmallow pastel pink & lavender towers, swirled lollipop spires, spun-sugar crystal roof,
- * rainbow gradient light arches.
+ * Multi-tier frosted cake & macaron royal terrace with scalloped cream dollops,
+ * 8 marshmallow & wafer-roll towers with spinning swirled lollipop spires,
+ * spun-sugar crystal spire surrounded by orbiting pastel macarons,
+ * and rainbow gradient light arches.
  */
 export function createCandyCastle(shelter: ShelterHouse): Group {
   const house = new Group();
   const marshmallowPink = 0xffc1e3;
   const marshmallowLavender = 0xebd9fc;
+  const mintIcing = 0xa7ffeb;
   const candyPink = shelter.colorHex || 0xff4081;
   const lollipopCyan = 0x00e5ff;
   const sugarCrystal = 0xff85c0;
 
-  // 1. Marshmallow central keep
-  const keepGeo = new CylinderGeometry(4.3, 4.7, 4.4, 18);
-  const keepMat = new MeshStandardMaterial({
-    color: marshmallowPink,
-    emissive: 0xba68c8,
+  const creamMat = new MeshStandardMaterial({
+    color: 0xfff8fc,
+    emissive: 0xffd1e6,
     emissiveIntensity: 0.22,
-    roughness: 0.55,
-    metalness: 0.05,
+    roughness: 0.4,
   });
-  const keep = new Mesh(keepGeo, keepMat);
-  keep.position.y = 1.8;
+
+  // 0. Multi-Tier Frosted Cake Terrace
+  const cakeTier1 = new Mesh(
+    new CylinderGeometry(10.2, 10.6, 0.75, 28),
+    new MeshStandardMaterial({
+      color: mintIcing,
+      emissive: 0x64ffda,
+      emissiveIntensity: 0.2,
+      roughness: 0.45,
+    }),
+  );
+  cakeTier1.position.y = 0.38;
+  const cakeTier2 = new Mesh(
+    new CylinderGeometry(7.6, 8.0, 0.7, 24),
+    new MeshStandardMaterial({
+      color: marshmallowPink,
+      emissive: 0xff80ab,
+      emissiveIntensity: 0.25,
+      roughness: 0.45,
+    }),
+  );
+  cakeTier2.position.y = 1.05;
+  house.add(cakeTier1, cakeTier2);
+
+  // Scalloped whipped-cream frosting dollops around the cake rims
+  const dollopGeo = new SphereGeometry(0.45, 10, 8);
+  for (let i = 0; i < 18; i++) {
+    const a = (i / 18) * Math.PI * 2;
+    const d1 = new Mesh(dollopGeo, creamMat);
+    d1.position.set(Math.cos(a) * 10.1, 0.85, Math.sin(a) * 10.1);
+    house.add(d1);
+  }
+
+  // 1. Marshmallow central keep
+  const keep = new Mesh(
+    new CylinderGeometry(4.4, 4.9, 5.2, 18),
+    new MeshStandardMaterial({
+      color: marshmallowPink,
+      emissive: 0xba68c8,
+      emissiveIntensity: 0.25,
+      roughness: 0.5,
+      metalness: 0.05,
+    }),
+  );
+  keep.position.y = 3.6;
   house.add(keep);
 
-  // 2. 4 Marshmallow pastel lavender towers with swirled lollipop spires
+  // 2. 4 Inner Marshmallow Towers with Swirled Lollipop Spires + 4 Outer Wafer Towers
   const towerAngles = [Math.PI * 0.25, Math.PI * 0.75, Math.PI * 1.25, Math.PI * 1.75];
-  const towerGeo = new CylinderGeometry(1.25, 1.4, 4.0, 14);
+  const towerGeo = new CylinderGeometry(1.28, 1.45, 5.2, 14);
   const towerMat = new MeshStandardMaterial({
     color: marshmallowLavender,
     emissive: 0x9c27b0,
-    emissiveIntensity: 0.25,
-    roughness: 0.5,
+    emissiveIntensity: 0.28,
+    roughness: 0.45,
   });
 
   for (let i = 0; i < towerAngles.length; i++) {
     const ta = towerAngles[i]!;
-    const tx = Math.cos(ta) * 4.6;
-    const tz = Math.sin(ta) * 4.6;
+    const tx = Math.cos(ta) * 4.8;
+    const tz = Math.sin(ta) * 4.8;
 
     const tower = new Mesh(towerGeo, towerMat);
-    tower.position.set(tx, 2.0, tz);
+    tower.position.set(tx, 3.6, tz);
     house.add(tower);
 
-    const stickGeo = new CylinderGeometry(0.18, 0.18, 2.2, 8);
-    const stickMat = new MeshStandardMaterial({ color: 0xffffff, roughness: 0.3 });
-    const stick = new Mesh(stickGeo, stickMat);
-    stick.position.set(tx, 4.6, tz);
+    const stick = new Mesh(
+      new CylinderGeometry(0.18, 0.18, 2.4, 8),
+      new MeshStandardMaterial({ color: 0xffffff, roughness: 0.28 }),
+    );
+    stick.position.set(tx, 7.2, tz);
     house.add(stick);
 
     const lolliColor = i % 2 === 0 ? candyPink : lollipopCyan;
-    const lolliHeadGeo = new CylinderGeometry(0.85, 0.85, 0.32, 16);
+    const lolliHeadGeo = new CylinderGeometry(0.95, 0.95, 0.34, 16);
     lolliHeadGeo.rotateX(Math.PI / 2);
-    const lolliMat = new MeshStandardMaterial({
-      color: lolliColor,
-      emissive: lolliColor,
-      emissiveIntensity: 0.65,
-      roughness: 0.2,
-      metalness: 0.15,
-    });
-    const lolliMesh = new Mesh(lolliHeadGeo, lolliMat);
-    lolliMesh.position.set(tx, 5.8, tz);
+    const lolliMesh = new Mesh(
+      lolliHeadGeo,
+      new MeshStandardMaterial({
+        color: lolliColor,
+        emissive: lolliColor,
+        emissiveIntensity: 0.7,
+        roughness: 0.18,
+        metalness: 0.18,
+      }),
+    );
+    lolliMesh.position.set(tx, 8.6, tz);
     lolliMesh.name = `candyLolli_${i}`;
     house.add(lolliMesh);
   }
 
-  // 3. Spun-sugar crystal roof
-  const roofBaseGeo = new CylinderGeometry(2.5, 2.8, 2.4, 14);
-  const roofBaseMat = new MeshStandardMaterial({
-    color: 0xfff0f8,
-    emissive: 0xff80ab,
-    emissiveIntensity: 0.35,
-    roughness: 0.25,
+  // 4 Outer Wafer-Roll Gatehouse & Corner Towers
+  const outerAngles = [Math.PI * 0.14, Math.PI * 0.86, Math.PI * 1.18, Math.PI * 1.82];
+  const outerTowerMat = new MeshStandardMaterial({
+    color: 0xffe0b2,
+    emissive: 0xffb74d,
+    emissiveIntensity: 0.22,
+    roughness: 0.5,
   });
-  const roofBase = new Mesh(roofBaseGeo, roofBaseMat);
-  roofBase.position.y = 4.6;
+  for (let i = 0; i < outerAngles.length; i++) {
+    const oa = outerAngles[i]!;
+    const ox = Math.cos(oa) * 8.2;
+    const oz = Math.sin(oa) * 8.2;
+    const ot = new Mesh(new CylinderGeometry(1.0, 1.15, 3.8, 12), outerTowerMat);
+    ot.position.set(ox, 2.4, oz);
+    const dome = new Mesh(
+      new SphereGeometry(1.25, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.55),
+      new MeshStandardMaterial({
+        color: i % 2 === 0 ? candyPink : lollipopCyan,
+        emissive: i % 2 === 0 ? 0xff4081 : 0x00b4d8,
+        emissiveIntensity: 0.45,
+        roughness: 0.3,
+      }),
+    );
+    dome.position.set(ox, 4.3, oz);
+    house.add(ot, dome);
+  }
+
+  // Candy lampposts along front carpet path
+  for (const side of [-1, 1] as const) {
+    const lamp = createGardenLamppost(creamMat, side < 0 ? candyPink : lollipopCyan, 2.3);
+    lamp.position.set(side * 2.1, 1.2, 6.8);
+    house.add(lamp);
+  }
+
+  // 3. Spun-sugar crystal roof & Orbiting Pastel Macarons
+  const roofBase = new Mesh(
+    new CylinderGeometry(2.7, 3.0, 2.6, 14),
+    new MeshStandardMaterial({
+      color: 0xfff0f8,
+      emissive: 0xff80ab,
+      emissiveIntensity: 0.38,
+      roughness: 0.25,
+    }),
+  );
+  roofBase.position.y = 7.0;
   house.add(roofBase);
 
-  const roofConeGeo = new ConeGeometry(2.7, 5.8, 16);
-  const roofConeMat = new MeshStandardMaterial({
-    color: sugarCrystal,
-    emissive: 0xff1493,
-    emissiveIntensity: 0.55,
-    roughness: 0.12,
-    metalness: 0.2,
-    transparent: true,
-    opacity: 0.88,
-  });
-  const roofCone = new Mesh(roofConeGeo, roofConeMat);
-  roofCone.position.y = 8.6;
+  const roofCone = new Mesh(
+    new ConeGeometry(3.0, 6.8, 16),
+    new MeshStandardMaterial({
+      color: sugarCrystal,
+      emissive: 0xff1493,
+      emissiveIntensity: 0.58,
+      roughness: 0.12,
+      metalness: 0.2,
+      transparent: true,
+      opacity: 0.9,
+    }),
+  );
+  roofCone.position.y = 11.4;
   roofCone.name = 'candyRoofCone';
   house.add(roofCone);
 
-  const starGeo = new OctahedronGeometry(0.85, 0);
-  const starMat = new MeshStandardMaterial({
-    color: 0xffeb3b,
-    emissive: 0xffd700,
-    emissiveIntensity: 0.85,
-    roughness: 0.15,
-    metalness: 0.5,
-  });
-  const star = new Mesh(starGeo, starMat);
-  star.position.y = 12.0;
+  // Orbiting Pastel Macarons around the upper spire
+  const macaronColors = [0xff80ab, 0x80d8ff, 0xfff59d, 0xb9f6ca, 0xea80fc, 0xffcc80];
+  const macaronGeo = new CylinderGeometry(0.55, 0.55, 0.36, 14);
+  for (let i = 0; i < 6; i++) {
+    const ma = (i / 6) * Math.PI * 2;
+    const mc = macaronColors[i]!;
+    const macaron = new Mesh(
+      macaronGeo,
+      new MeshStandardMaterial({
+        color: mc,
+        emissive: mc,
+        emissiveIntensity: 0.55,
+        roughness: 0.25,
+      }),
+    );
+    macaron.position.set(Math.cos(ma) * 3.4, 9.6, Math.sin(ma) * 3.4);
+    macaron.name = `candyMacaron_${i}`;
+    house.add(macaron);
+  }
+
+  const star = new Mesh(
+    new OctahedronGeometry(1.05, 0),
+    new MeshStandardMaterial({
+      color: 0xffeb3b,
+      emissive: 0xffd700,
+      emissiveIntensity: 0.88,
+      roughness: 0.14,
+      metalness: 0.55,
+    }),
+  );
+  star.position.y = 15.2;
   star.name = 'candyStarFinial';
   house.add(star);
 
   // 4. Rainbow gradient light arches
   const rainbowGroup = new Group();
-  rainbowGroup.position.set(0, 0, 4.4);
+  rainbowGroup.position.set(0, 1.3, 4.7);
   const rainbowColors = [0xff4081, 0xff9800, 0xffeb3b, 0x4caf50, 0x00e5ff, 0x7c4dff];
   for (let i = 0; i < rainbowColors.length; i++) {
-    const rIn = 1.1 + i * 0.18;
-    const rOut = rIn + 0.16;
-    const archRingGeo = new RingGeometry(rIn, rOut, 20, 1, 0, Math.PI);
-    const archRingMat = new MeshBasicMaterial({
-      color: rainbowColors[i]!,
-      side: DoubleSide,
-    });
-    const archRing = new Mesh(archRingGeo, archRingMat);
-    archRing.position.set(0, 1.8, 0.2 - i * 0.03);
+    const rIn = 1.25 + i * 0.2;
+    const rOut = rIn + 0.18;
+    const archRing = new Mesh(
+      new RingGeometry(rIn, rOut, 22, 1, 0, Math.PI),
+      new MeshBasicMaterial({
+        color: rainbowColors[i]!,
+        side: DoubleSide,
+      }),
+    );
+    archRing.position.set(0, 2.0, 0.22 - i * 0.03);
     rainbowGroup.add(archRing);
   }
 
-  const portalGeo = new CircleGeometry(1.05, 18, 0, Math.PI);
-  const portalMat = new MeshBasicMaterial({
-    color: 0xfff9c4,
-    transparent: true,
-    opacity: 0.9,
-    side: DoubleSide,
-  });
-  const portal = new Mesh(portalGeo, portalMat);
-  portal.position.set(0, 1.8, 0.22);
+  const portal = new Mesh(
+    new CircleGeometry(1.2, 20, 0, Math.PI),
+    new MeshBasicMaterial({
+      color: 0xfff9c4,
+      transparent: true,
+      opacity: 0.92,
+      side: DoubleSide,
+    }),
+  );
+  portal.position.set(0, 2.0, 0.24);
   rainbowGroup.add(portal);
 
   house.add(rainbowGroup);
@@ -750,7 +1340,9 @@ export function createCandyCastle(shelter: ShelterHouse): Group {
 
 /**
  * Creates the 3D geometry for Blossom Sanctuary (Lâu Đài Hoa Tiên Bướm):
- * Layered glowing pink lotus/rose petals, fairy butterfly wing entrance, floating golden pollen particles.
+ * Tiered jade-leaf & rose-quartz courtyard terrace, 3-tier monumental lotus/rose
+ * petal cathedral, 4 flanking fairy floral gazebo towers, rotating petal crown ring,
+ * iridescent butterfly wing entrance, and swirling golden pollen particles.
  */
 export function createBlossomSanctuary(shelter: ShelterHouse): Group {
   const house = new Group();
@@ -758,95 +1350,161 @@ export function createBlossomSanctuary(shelter: ShelterHouse): Group {
   const coreGold = 0xffd700;
   const leafGreen = 0x66bb6a;
 
-  // 1. Layered glowing lotus/rose petals
-  const outerPetalGeo = new SphereGeometry(1.4, 12, 10);
-  outerPetalGeo.scale(0.8, 1.8, 0.25);
+  const roseQuartzMat = new MeshStandardMaterial({
+    color: 0xffeff6,
+    emissive: 0xff80ab,
+    emissiveIntensity: 0.22,
+    roughness: 0.25,
+    metalness: 0.15,
+  });
+
+  // 0. Grand Tiered Jade-Leaf & Rose-Quartz Terrace
+  const terraceOuter = new Mesh(
+    new CylinderGeometry(9.8, 10.4, 0.5, 24),
+    new MeshStandardMaterial({
+      color: leafGreen,
+      emissive: 0x2e7d32,
+      emissiveIntensity: 0.25,
+      roughness: 0.55,
+    }),
+  );
+  terraceOuter.position.y = 0.25;
+  const terraceInner = new Mesh(new CylinderGeometry(7.0, 7.5, 0.55, 20), roseQuartzMat);
+  terraceInner.position.y = 0.72;
+  house.add(terraceOuter, terraceInner);
+
+  // 1. 3-Tier Layered Glowing Lotus/Rose Petals
+  const outerPetalGeo = new SphereGeometry(1.65, 12, 10);
+  outerPetalGeo.scale(0.85, 2.1, 0.26);
   const petalMat = new MeshStandardMaterial({
     color: petalPink,
     emissive: 0xff4081,
-    emissiveIntensity: 0.48,
-    roughness: 0.35,
-    metalness: 0.05,
+    emissiveIntensity: 0.5,
+    roughness: 0.32,
+    metalness: 0.08,
     transparent: true,
     opacity: 0.92,
   });
 
-  const outerCount = 8;
+  const outerCount = 10;
   for (let i = 0; i < outerCount; i++) {
     const a = (i / outerCount) * Math.PI * 2;
     const petal = new Mesh(outerPetalGeo, petalMat);
-    const r = 3.6;
-    petal.position.set(Math.cos(a) * r, 2.0, Math.sin(a) * r);
+    const r = 5.2;
+    petal.position.set(Math.cos(a) * r, 2.7, Math.sin(a) * r);
     petal.rotation.y = -a + Math.PI / 2;
-    petal.rotation.x = 0.45;
+    petal.rotation.x = 0.55;
+    house.add(petal);
+  }
+
+  const midPetalGeo = new SphereGeometry(1.45, 12, 10);
+  midPetalGeo.scale(0.78, 2.1, 0.24);
+  const midCount = 8;
+  for (let i = 0; i < midCount; i++) {
+    const a = (i / midCount) * Math.PI * 2 + 0.2;
+    const petal = new Mesh(midPetalGeo, petalMat);
+    const r = 3.7;
+    petal.position.set(Math.cos(a) * r, 3.6, Math.sin(a) * r);
+    petal.rotation.y = -a + Math.PI / 2;
+    petal.rotation.x = 0.36;
     house.add(petal);
   }
 
   const innerPetalGeo = new SphereGeometry(1.2, 12, 10);
-  innerPetalGeo.scale(0.7, 1.9, 0.22);
+  innerPetalGeo.scale(0.7, 2.2, 0.22);
   const innerCount = 6;
   for (let i = 0; i < innerCount; i++) {
-    const a = (i / innerCount) * Math.PI * 2 + 0.3;
+    const a = (i / innerCount) * Math.PI * 2 + 0.45;
     const petal = new Mesh(innerPetalGeo, petalMat);
-    const r = 2.4;
-    petal.position.set(Math.cos(a) * r, 2.7, Math.sin(a) * r);
+    const r = 2.3;
+    petal.position.set(Math.cos(a) * r, 4.7, Math.sin(a) * r);
     petal.rotation.y = -a + Math.PI / 2;
-    petal.rotation.x = 0.22;
+    petal.rotation.x = 0.18;
     house.add(petal);
   }
 
-  // Golden lotus core altar
-  const coreGeo = new CylinderGeometry(1.6, 2.0, 3.2, 16);
-  const coreMat = new MeshStandardMaterial({
-    color: 0xfff9c4,
-    emissive: coreGold,
-    emissiveIntensity: 0.75,
-    roughness: 0.2,
-    metalness: 0.2,
-  });
-  const core = new Mesh(coreGeo, coreMat);
-  core.position.y = 1.6;
+  // Golden lotus core gazebo spire
+  const core = new Mesh(
+    new CylinderGeometry(1.75, 2.2, 5.0, 16),
+    new MeshStandardMaterial({
+      color: 0xfff9c4,
+      emissive: coreGold,
+      emissiveIntensity: 0.75,
+      roughness: 0.2,
+      metalness: 0.25,
+    }),
+  );
+  core.position.y = 3.3;
   core.name = 'blossomCore';
   house.add(core);
 
+  // Rotating petal crown ring
+  const crownRing = new Mesh(
+    new TorusGeometry(2.5, 0.1, 8, 24),
+    new MeshStandardMaterial({
+      color: 0xffd700,
+      emissive: 0xffb300,
+      emissiveIntensity: 0.72,
+      metalness: 0.6,
+    }),
+  );
+  crownRing.rotation.x = Math.PI / 2;
+  crownRing.position.y = 6.2;
+  crownRing.name = 'blossomCrownRing';
+  house.add(crownRing);
+
   // Floating blossom apex jewel
-  const apexGeo = new OctahedronGeometry(1.1, 0);
-  apexGeo.scale(0.8, 1.3, 0.8);
-  const apexMat = new MeshStandardMaterial({
-    color: 0xffffff,
-    emissive: 0xff80ab,
-    emissiveIntensity: 0.85,
-    roughness: 0.15,
-    metalness: 0.4,
-  });
-  const apex = new Mesh(apexGeo, apexMat);
-  apex.position.y = 4.8;
+  const apexGeo = new OctahedronGeometry(1.3, 0);
+  apexGeo.scale(0.82, 1.4, 0.82);
+  const apex = new Mesh(
+    apexGeo,
+    new MeshStandardMaterial({
+      color: 0xffffff,
+      emissive: 0xff80ab,
+      emissiveIntensity: 0.88,
+      roughness: 0.12,
+      metalness: 0.4,
+    }),
+  );
+  apex.position.y = 7.9;
   apex.name = 'blossomApex';
   house.add(apex);
 
+  // 4 Flanking Fairy Floral Gazebo Towers
+  const gazeboAngles = [Math.PI * 0.25, Math.PI * 0.75, Math.PI * 1.25, Math.PI * 1.75];
+  for (const ga of gazeboAngles) {
+    const gx = Math.cos(ga) * 7.8;
+    const gz = Math.sin(ga) * 7.8;
+    const col = new Mesh(new CylinderGeometry(0.42, 0.55, 3.6, 10), roseQuartzMat);
+    col.position.set(gx, 2.2, gz);
+    const canopy = new Mesh(new ConeGeometry(1.5, 1.8, 10), petalMat);
+    canopy.position.set(gx, 4.7, gz);
+    house.add(col, canopy);
+  }
+
   // 2. Fairy butterfly wing entrance
   const wingGroup = new Group();
-  wingGroup.position.set(0, 0, 3.6);
+  wingGroup.position.set(0, 0.85, 5.2);
 
-  const wingGeo = new CircleGeometry(1.6, 16, 0, Math.PI * 1.3);
+  const wingGeo = new CircleGeometry(1.9, 16, 0, Math.PI * 1.3);
   const wingMat = new MeshStandardMaterial({
     color: 0xff4081,
     emissive: 0x7c4dff,
-    emissiveIntensity: 0.55,
+    emissiveIntensity: 0.58,
     transparent: true,
-    opacity: 0.75,
+    opacity: 0.78,
     side: DoubleSide,
-    roughness: 0.3,
+    roughness: 0.28,
   });
 
   const leftWing = new Mesh(wingGeo, wingMat);
-  leftWing.position.set(-1.1, 2.2, 0.2);
+  leftWing.position.set(-1.35, 2.5, 0.22);
   leftWing.rotation.z = 0.4;
   leftWing.rotation.y = 0.2;
   leftWing.name = 'blossomWingLeft';
 
   const rightWing = new Mesh(wingGeo, wingMat);
-  rightWing.position.set(1.1, 2.2, 0.2);
+  rightWing.position.set(1.35, 2.5, 0.22);
   rightWing.rotation.z = -0.4;
   rightWing.rotation.y = -0.2;
   rightWing.scale.x = -1;
@@ -854,44 +1512,46 @@ export function createBlossomSanctuary(shelter: ShelterHouse): Group {
 
   wingGroup.add(leftWing, rightWing);
 
-  const portalGeo = new CircleGeometry(1.1, 16, 0, Math.PI);
-  const portalMat = new MeshBasicMaterial({
-    color: 0xfff0f6,
-    transparent: true,
-    opacity: 0.88,
-    side: DoubleSide,
-  });
-  const portal = new Mesh(portalGeo, portalMat);
-  portal.position.set(0, 1.8, 0.15);
+  const portal = new Mesh(
+    new CircleGeometry(1.25, 18, 0, Math.PI),
+    new MeshBasicMaterial({
+      color: 0xfff0f6,
+      transparent: true,
+      opacity: 0.9,
+      side: DoubleSide,
+    }),
+  );
+  portal.position.set(0, 2.1, 0.16);
   wingGroup.add(portal);
 
   house.add(wingGroup);
 
   // 3. Floating golden pollen particles
   const pollenCount = 8;
-  const pollenGeo = new SphereGeometry(0.18, 8, 6);
+  const pollenGeo = new SphereGeometry(0.22, 8, 6);
   const pollenMat = new MeshBasicMaterial({ color: 0xffeb3b });
   for (let i = 0; i < pollenCount; i++) {
     const pollen = new Mesh(pollenGeo, pollenMat);
     const a = (i / pollenCount) * Math.PI * 2;
-    const r = 2.0 + (i % 3) * 0.9;
-    pollen.position.set(Math.cos(a) * r, 1.2 + (i % 4) * 0.8, Math.sin(a) * r);
+    const r = 2.6 + (i % 3) * 1.1;
+    pollen.position.set(Math.cos(a) * r, 2.0 + (i % 4) * 0.95, Math.sin(a) * r);
     pollen.name = `blossomPollen_${i}`;
     house.add(pollen);
   }
 
-  // Lotus base lily pad ring
-  const padGeo = new RingGeometry(2.8, 4.8, 24);
-  const padMat = new MeshStandardMaterial({
-    color: leafGreen,
-    emissive: 0x2e7d32,
-    emissiveIntensity: 0.25,
-    roughness: 0.6,
-    side: DoubleSide,
-  });
-  const pad = new Mesh(padGeo, padMat);
+  // Lotus base lily pad moat ring
+  const pad = new Mesh(
+    new RingGeometry(7.2, 9.6, 28),
+    new MeshStandardMaterial({
+      color: leafGreen,
+      emissive: 0x2e7d32,
+      emissiveIntensity: 0.28,
+      roughness: 0.6,
+      side: DoubleSide,
+    }),
+  );
   pad.rotation.x = -Math.PI / 2;
-  pad.position.y = 0.02;
+  pad.position.y = 0.52;
   house.add(pad);
 
   return house;
@@ -899,8 +1559,9 @@ export function createBlossomSanctuary(shelter: ShelterHouse): Group {
 
 /**
  * Creates the 3D geometry for Starlight Palace (Cung Điện Tinh Tú Ánh Sao):
- * Celestial blue & violet crystal towers, glowing moon crescent finials, rotating star apex,
- * constellation floor ring.
+ * Celestial marble astrolabe terrace, 12 crystal zodiac obelisks, sapphire &
+ * amethyst observatory citadel, 6 celestial towers with glowing crescent moons,
+ * twin rotating golden orbital armillary rings, rotating star apex, and constellation ring.
  */
 export function createStarlightPalace(shelter: ShelterHouse): Group {
   const house = new Group();
@@ -909,136 +1570,181 @@ export function createStarlightPalace(shelter: ShelterHouse): Group {
   const starCyan = 0x00e5ff;
   const moonGold = 0xfff8e1;
 
-  // 1. Central hexagonal tower
-  const keepGeo = new CylinderGeometry(3.6, 4.2, 5.2, 6);
-  const keepMat = new MeshStandardMaterial({
-    color: celestialNavy,
+  const astrolabeMat = new MeshStandardMaterial({
+    color: 0x1e255e,
     emissive: cosmicViolet,
-    emissiveIntensity: 0.42,
-    roughness: 0.2,
+    emissiveIntensity: 0.28,
+    roughness: 0.22,
     metalness: 0.45,
   });
-  const keep = new Mesh(keepGeo, keepMat);
-  keep.position.y = 2.3;
+
+  // 0. Celestial Marble Astrolabe Terrace
+  const terraceOuter = new Mesh(new CylinderGeometry(9.6, 10.2, 0.5, 12), astrolabeMat);
+  terraceOuter.position.y = 0.25;
+  const terraceInner = new Mesh(new CylinderGeometry(6.8, 7.3, 0.55, 12), astrolabeMat);
+  terraceInner.position.y = 0.72;
+  house.add(terraceOuter, terraceInner);
+
+  // 1. Central hexagonal observatory tower
+  const keep = new Mesh(
+    new CylinderGeometry(3.8, 4.4, 6.4, 6),
+    new MeshStandardMaterial({
+      color: celestialNavy,
+      emissive: cosmicViolet,
+      emissiveIntensity: 0.46,
+      roughness: 0.18,
+      metalness: 0.48,
+    }),
+  );
+  keep.position.y = 3.8;
   house.add(keep);
 
-  // 4 slender towers in cosmic violet with moon crescents
-  const towerAngles = [Math.PI * 0.25, Math.PI * 0.75, Math.PI * 1.25, Math.PI * 1.75];
-  const towerGeo = new CylinderGeometry(1.1, 1.3, 4.8, 6);
+  // 2. 6 Slender Celestial Towers with Crescent Moon Finials
+  const towerPositions = [
+    { angle: Math.PI * 0.25, radius: 4.8, height: 5.8, coneH: 3.6 },
+    { angle: Math.PI * 0.75, radius: 4.8, height: 5.8, coneH: 3.6 },
+    { angle: Math.PI * 1.25, radius: 4.8, height: 5.8, coneH: 3.6 },
+    { angle: Math.PI * 1.75, radius: 4.8, height: 5.8, coneH: 3.6 },
+    { angle: Math.PI * 0.12, radius: 8.2, height: 4.0, coneH: 2.8 },
+    { angle: Math.PI * 0.88, radius: 8.2, height: 4.0, coneH: 2.8 },
+  ];
   const towerMat = new MeshStandardMaterial({
     color: 0x311b92,
     emissive: cosmicViolet,
-    emissiveIntensity: 0.5,
-    roughness: 0.25,
-    metalness: 0.35,
+    emissiveIntensity: 0.52,
+    roughness: 0.22,
+    metalness: 0.38,
   });
-
+  const coneMat = new MeshStandardMaterial({
+    color: 0x536dfe,
+    emissive: 0x304ffe,
+    emissiveIntensity: 0.58,
+    roughness: 0.15,
+    metalness: 0.32,
+  });
   const moonMat = new MeshStandardMaterial({
     color: moonGold,
     emissive: 0xffd54f,
-    emissiveIntensity: 0.85,
+    emissiveIntensity: 0.9,
     roughness: 0.15,
-    metalness: 0.4,
+    metalness: 0.45,
     side: DoubleSide,
   });
 
-  for (let i = 0; i < towerAngles.length; i++) {
-    const ta = towerAngles[i]!;
-    const tx = Math.cos(ta) * 4.5;
-    const tz = Math.sin(ta) * 4.5;
+  const crescentGeo = new RingGeometry(0.48, 0.78, 16, 1, 0, Math.PI * 1.5);
+  for (let i = 0; i < towerPositions.length; i++) {
+    const tp = towerPositions[i]!;
+    const tx = Math.cos(tp.angle) * tp.radius;
+    const tz = Math.sin(tp.angle) * tp.radius;
 
-    const tower = new Mesh(towerGeo, towerMat);
-    tower.position.set(tx, 2.4, tz);
-    house.add(tower);
+    const tower = new Mesh(new CylinderGeometry(1.05, 1.28, tp.height, 6), towerMat);
+    tower.position.set(tx, 0.8 + tp.height * 0.5, tz);
 
-    const coneGeo = new ConeGeometry(1.3, 3.2, 6);
-    const coneMat = new MeshStandardMaterial({
-      color: 0x536dfe,
-      emissive: 0x304ffe,
-      emissiveIntensity: 0.55,
-      roughness: 0.15,
-      metalness: 0.3,
-    });
-    const cone = new Mesh(coneGeo, coneMat);
-    cone.position.set(tx, 5.8, tz);
-    house.add(cone);
+    const cone = new Mesh(new ConeGeometry(1.32, tp.coneH, 6), coneMat);
+    cone.position.set(tx, 0.8 + tp.height + tp.coneH * 0.5, tz);
 
-    const crescentGeo = new RingGeometry(0.45, 0.75, 16, 1, 0, Math.PI * 1.5);
     const crescent = new Mesh(crescentGeo, moonMat);
-    crescent.position.set(tx, 7.8, tz);
-    crescent.rotation.y = ta;
+    crescent.position.set(tx, 0.8 + tp.height + tp.coneH + 0.5, tz);
+    crescent.rotation.y = tp.angle;
     crescent.name = `moonCrescent_${i}`;
-    house.add(crescent);
+
+    house.add(tower, cone, crescent);
   }
 
-  // 2. Central Spire & Rotating star apex
-  const spireGeo = new ConeGeometry(2.4, 6.5, 8);
-  const spireMat = new MeshStandardMaterial({
-    color: 0x283593,
-    emissive: 0x651fff,
-    emissiveIntensity: 0.6,
-    roughness: 0.18,
-    metalness: 0.4,
-  });
-  const spire = new Mesh(spireGeo, spireMat);
-  spire.position.y = 8.0;
+  // 3. Central Spire, Twin Golden Orbital Armillary Rings & Rotating Star Apex
+  const spire = new Mesh(
+    new ConeGeometry(2.6, 7.6, 8),
+    new MeshStandardMaterial({
+      color: 0x283593,
+      emissive: 0x651fff,
+      emissiveIntensity: 0.62,
+      roughness: 0.18,
+      metalness: 0.42,
+    }),
+  );
+  spire.position.y = 10.2;
   house.add(spire);
 
-  const starGeo = new OctahedronGeometry(1.3, 0);
-  const starMat = new MeshStandardMaterial({
-    color: 0xffffff,
-    emissive: starCyan,
-    emissiveIntensity: 0.95,
-    roughness: 0.1,
+  const orbitRingMat = new MeshStandardMaterial({
+    color: 0xffe082,
+    emissive: 0xffd54f,
+    emissiveIntensity: 0.78,
     metalness: 0.7,
+    roughness: 0.18,
   });
-  const starApex = new Mesh(starGeo, starMat);
-  starApex.position.y = 12.0;
+  const orbitRingA = new Mesh(new TorusGeometry(3.4, 0.08, 8, 32), orbitRingMat);
+  orbitRingA.position.y = 10.6;
+  orbitRingA.rotation.x = Math.PI * 0.35;
+  orbitRingA.name = 'starlightOrbitRingA';
+
+  const orbitRingB = new Mesh(new TorusGeometry(2.8, 0.07, 8, 32), orbitRingMat);
+  orbitRingB.position.y = 11.4;
+  orbitRingB.rotation.x = -Math.PI * 0.35;
+  orbitRingB.name = 'starlightOrbitRingB';
+  house.add(orbitRingA, orbitRingB);
+
+  const starApex = new Mesh(
+    new OctahedronGeometry(1.45, 0),
+    new MeshStandardMaterial({
+      color: 0xffffff,
+      emissive: starCyan,
+      emissiveIntensity: 0.95,
+      roughness: 0.1,
+      metalness: 0.7,
+    }),
+  );
+  starApex.position.y = 14.8;
   starApex.name = 'starlightApex';
   house.add(starApex);
 
-  // 3. Constellation floor ring
-  const constRingGeo = new RingGeometry(3.5, 4.6, 32);
-  const constRingMat = new MeshBasicMaterial({
-    color: 0x80d8ff,
-    transparent: true,
-    opacity: 0.55,
-    side: DoubleSide,
-  });
-  const constRing = new Mesh(constRingGeo, constRingMat);
+  // 4. Constellation floor ring & 12 Zodiac Star Obelisks
+  const constRing = new Mesh(
+    new RingGeometry(5.6, 7.4, 36),
+    new MeshBasicMaterial({
+      color: 0x80d8ff,
+      transparent: true,
+      opacity: 0.6,
+      side: DoubleSide,
+    }),
+  );
   constRing.rotation.x = -Math.PI / 2;
-  constRing.position.y = 0.02;
+  constRing.position.y = 0.52;
   constRing.name = 'constellationRing';
   house.add(constRing);
 
-  const starNodeGeo = new OctahedronGeometry(0.25, 0);
+  const starNodeGeo = new OctahedronGeometry(0.32, 0);
   const starNodeMat = new MeshBasicMaterial({ color: 0xffffff });
-  for (let i = 0; i < 8; i++) {
-    const a = (i / 8) * Math.PI * 2;
+  const obeliskGeo = new ConeGeometry(0.28, 1.5, 5);
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2;
     const node = new Mesh(starNodeGeo, starNodeMat);
-    node.position.set(Math.cos(a) * 4.05, 0.05, Math.sin(a) * 4.05);
-    house.add(node);
+    node.position.set(Math.cos(a) * 6.5, 1.05, Math.sin(a) * 6.5);
+    const ob = new Mesh(obeliskGeo, coneMat);
+    ob.position.set(Math.cos(a) * 8.8, 1.25, Math.sin(a) * 8.8);
+    house.add(node, ob);
   }
 
-  // 4. Arched celestial gateway
+  // 5. Arched celestial gateway
   const gateGroup = new Group();
-  gateGroup.position.set(0, 0, 4.1);
+  gateGroup.position.set(0, 0.95, 4.4);
 
-  const archGeo = new RingGeometry(1.2, 1.6, 20, 1, 0, Math.PI);
-  const archMat = new MeshBasicMaterial({ color: starCyan, side: DoubleSide });
-  const arch = new Mesh(archGeo, archMat);
-  arch.position.set(0, 2.4, 0.2);
+  const arch = new Mesh(
+    new RingGeometry(1.3, 1.8, 22, 1, 0, Math.PI),
+    new MeshBasicMaterial({ color: starCyan, side: DoubleSide }),
+  );
+  arch.position.set(0, 2.5, 0.2);
   gateGroup.add(arch);
 
-  const portalGeo = new CircleGeometry(1.2, 18, 0, Math.PI);
-  const portalMat = new MeshBasicMaterial({
-    color: 0xb388ff,
-    transparent: true,
-    opacity: 0.88,
-    side: DoubleSide,
-  });
-  const portal = new Mesh(portalGeo, portalMat);
-  portal.position.set(0, 2.4, 0.18);
+  const portal = new Mesh(
+    new CircleGeometry(1.3, 20, 0, Math.PI),
+    new MeshBasicMaterial({
+      color: 0xb388ff,
+      transparent: true,
+      opacity: 0.9,
+      side: DoubleSide,
+    }),
+  );
+  portal.position.set(0, 2.5, 0.18);
   gateGroup.add(portal);
 
   house.add(gateGroup);
@@ -1089,16 +1795,16 @@ export function createShelterVisual(shelter: ShelterHouse): ShelterVisualEntry {
   const domeGroup = new Group();
   const domeRadius = shelter.radius;
 
-  // Outer smooth protective dome (hemisphere)
+  // Outer smooth protective dome (hemisphere — crystal-clear resting opacity so grand architecture shines)
   const domeGeo = new SphereGeometry(domeRadius, 32, 18, 0, Math.PI * 2, 0, Math.PI * 0.5);
   const domeMat = new MeshStandardMaterial({
     color: shelter.colorHex,
     emissive: shelter.colorHex,
-    emissiveIntensity: 0.22,
-    roughness: 0.15,
+    emissiveIntensity: 0.18,
+    roughness: 0.12,
     metalness: 0.1,
     transparent: true,
-    opacity: 0.18,
+    opacity: 0.1,
     side: DoubleSide,
     depthWrite: false,
   });
@@ -1119,7 +1825,7 @@ export function createShelterVisual(shelter: ShelterHouse): ShelterVisualEntry {
     color: shelter.colorHex,
     wireframe: true,
     transparent: true,
-    opacity: 0.12,
+    opacity: 0.08,
     depthWrite: false,
   });
   const domeLattice = new Mesh(latticeGeo, domeLatticeMat);
@@ -1621,11 +2327,86 @@ function createSkyMonsterVisual(): SkyMonsterVisual {
   };
 }
 
+/** Create decorative enchanted waystone arches along the royal avenues toward grand palaces. */
+function buildWaystonesInto(group: Group, shelters: readonly ShelterHouse[]): void {
+  const origin = shelters.find((s) => s.kind === 'castle') ?? { x: 0, z: 0 };
+  const grandKinds = new Set(['mermaid', 'candy', 'blossom', 'starlight']);
+  const destinations = shelters.filter((s) => grandKinds.has(s.kind));
+  if (destinations.length === 0) return;
+
+  const pillarGeo = new CylinderGeometry(0.24, 0.34, 3.6, 8);
+  const archGeo = new TorusGeometry(2.3, 0.2, 8, 22, Math.PI);
+  const starGeo = new OctahedronGeometry(0.42, 0);
+  const baseGeo = new CylinderGeometry(0.48, 0.56, 0.28, 8);
+
+  const starMat = new MeshStandardMaterial({
+    color: 0xfff8e1,
+    emissive: 0xffd54f,
+    emissiveIntensity: 0.85,
+    roughness: 0.15,
+    metalness: 0.5,
+  });
+
+  for (const dest of destinations) {
+    const dx = dest.x - origin.x;
+    const dz = dest.z - origin.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist < 45) continue;
+
+    const pillarMat = new MeshStandardMaterial({
+      color: 0xfff8fc,
+      emissive: dest.colorHex,
+      emissiveIntensity: 0.24,
+      roughness: 0.3,
+    });
+    const archMat = new MeshStandardMaterial({
+      color: dest.colorHex,
+      emissive: dest.colorHex,
+      emissiveIntensity: 0.58,
+      roughness: 0.22,
+      metalness: 0.2,
+    });
+
+    const rotY = Math.atan2(dx, dz);
+    const steps = Math.floor(dist / 45);
+    for (let i = 1; i < steps; i++) {
+      const t = (i * 45) / dist;
+      const ax = origin.x + dx * t;
+      const az = origin.z + dz * t;
+
+      // Never overlap any shelter protective dome
+      const tooClose = shelters.some((s) => Math.hypot(ax - s.x, az - s.z) < s.radius + 7);
+      if (tooClose) continue;
+
+      const archGroup = new Group();
+      archGroup.position.set(ax, FLOOR_Y, az);
+      archGroup.rotation.y = rotY;
+
+      for (const side of [-1, 1] as const) {
+        const base = new Mesh(baseGeo, pillarMat);
+        base.position.set(side * 2.3, 0.14, 0);
+        const pillar = new Mesh(pillarGeo, pillarMat);
+        pillar.position.set(side * 2.3, 1.9, 0);
+        archGroup.add(base, pillar);
+      }
+
+      const arch = new Mesh(archGeo, archMat);
+      arch.position.set(0, 3.6, 0);
+      const star = new Mesh(starGeo, starMat);
+      star.position.set(0, 6.25, 0);
+
+      archGroup.add(arch, star);
+      group.add(archGroup);
+    }
+  }
+}
+
 /**
  * 3D Rendering Controller for Snake Shelters (Fairy Houses) and the Sky Monster Calamity.
  *
  * Responsibilities:
- * - Renders 7 Sanctuary Houses (Royal Castle, Mushroom Cottages, Crystal Sanctuaries).
+ * - Renders 11 Grand Sanctuary Castles, Palaces & Fairy Houses with lush fairytale architecture.
+ * - Renders decorative enchanted waystone arches along royal avenues toward the grand palaces.
  * - Smoothly manages the glowing protective domes, ground boundary rings, and soothing entrance auras.
  * - Renders the Sky Monster Calamity: soaring across clouds during warning, casting moving ground shadows,
  *   swooping down during strike, and deflecting against shelter shields.
@@ -1634,12 +2415,15 @@ function createSkyMonsterVisual(): SkyMonsterVisual {
 export class Shelter3DView {
   private readonly root = new Group();
   private readonly shelterVisuals: ShelterVisualEntry[] = [];
+  private readonly waystonesGroup = new Group();
   private readonly skyMonster: SkyMonsterVisual;
 
   constructor(
     private readonly scene: Scene,
     _maxGrid = 560,
   ) {
+    this.waystonesGroup.name = 'waystonesGroup';
+    this.root.add(this.waystonesGroup);
     this.skyMonster = createSkyMonsterVisual();
     this.root.add(this.skyMonster.root);
     this.scene.add(this.root);
@@ -1664,12 +2448,18 @@ export class Shelter3DView {
     }
     this.shelterVisuals.length = 0;
 
+    // Clear old waystones
+    disposeGroup(this.waystonesGroup);
+    this.waystonesGroup.clear();
+
     // Create fresh visuals
     for (const s of shelters) {
       const visual = createShelterVisual(s);
       this.root.add(visual.group);
       this.shelterVisuals.push(visual);
     }
+
+    buildWaystonesInto(this.waystonesGroup, shelters);
   }
 
   /**
@@ -1718,20 +2508,47 @@ export class Shelter3DView {
         const star = entry.houseGroup.getObjectByName('starFinial');
         if (star) {
           star.rotation.y = elapsed * 1.5;
-          star.position.y = 13.2 + Math.sin(elapsed * 2.5) * 0.2;
+          star.position.y = 19.6 + Math.sin(elapsed * 2.5) * 0.22;
+        }
+        const crownHalo = entry.houseGroup.getObjectByName('castleCrownHalo');
+        if (crownHalo) {
+          crownHalo.rotation.y = elapsed * 0.95;
+          crownHalo.position.y = 17.5 + Math.sin(elapsed * 2.0) * 0.18;
+        }
+        for (let i = 0; i < 11; i++) {
+          const flag = entry.houseGroup.getObjectByName(`castleFlag_${i}`);
+          if (flag) {
+            flag.rotation.y = Math.sin(elapsed * 5.2 + i * 0.9) * 0.28;
+          }
+        }
+      } else if (entry.shelter.kind === 'mushroom') {
+        for (let i = 0; i < 4; i++) {
+          const spore = entry.houseGroup.getObjectByName(`mushroomSpore_${i}`);
+          if (spore) {
+            spore.position.y = 6.7 + ((elapsed * 0.9 + i * 0.65) % 2.4);
+          }
         }
       } else if (entry.shelter.kind === 'crystal') {
         const apex = entry.houseGroup.getObjectByName('crystalApex');
         if (apex) {
           apex.rotation.y = elapsed * 1.2;
           apex.rotation.x = Math.sin(elapsed * 0.8) * 0.15;
-          apex.position.y = 4.6 + Math.sin(elapsed * 2.0) * 0.25;
+          apex.position.y = 5.4 + Math.sin(elapsed * 2.0) * 0.25;
         }
+        const haloA = entry.houseGroup.getObjectByName('crystalHaloA');
+        const haloB = entry.houseGroup.getObjectByName('crystalHaloB');
+        if (haloA) haloA.rotation.z = elapsed * 1.1;
+        if (haloB) haloB.rotation.z = -elapsed * 1.3;
       } else if (entry.shelter.kind === 'mermaid') {
         const pearl = entry.houseGroup.getObjectByName('mermaidPearl');
         if (pearl) {
           pearl.rotation.y = elapsed * 0.8;
-          pearl.position.y = 6.2 + Math.sin(elapsed * 2.0) * 0.2;
+          pearl.position.y = 7.9 + Math.sin(elapsed * 2.0) * 0.22;
+        }
+        const pearlHalo = entry.houseGroup.getObjectByName('mermaidPearlHalo');
+        if (pearlHalo) {
+          pearlHalo.rotation.z = elapsed * 0.9;
+          pearlHalo.position.y = 7.9 + Math.sin(elapsed * 2.0) * 0.22;
         }
         const ripples = entry.houseGroup.getObjectByName('mermaidRipples');
         if (ripples) {
@@ -1740,8 +2557,14 @@ export class Shelter3DView {
         for (let i = 0; i < 7; i++) {
           const bubble = entry.houseGroup.getObjectByName(`mermaidBubble_${i}`);
           if (bubble) {
-            bubble.position.y = 1.5 + ((elapsed * 1.2 + i * 0.8) % 4.0);
+            bubble.position.y = 1.8 + ((elapsed * 1.2 + i * 0.8) % 5.0);
             bubble.scale.setScalar(0.8 + Math.sin(elapsed * 3.0 + i) * 0.2);
+          }
+        }
+        for (let i = 0; i < 6; i++) {
+          const ribbon = entry.houseGroup.getObjectByName(`mermaidRibbon_${i}`);
+          if (ribbon) {
+            ribbon.rotation.y = Math.sin(elapsed * 4.5 + i * 1.1) * 0.26;
           }
         }
       } else if (entry.shelter.kind === 'candy') {
@@ -1759,11 +2582,27 @@ export class Shelter3DView {
             lolli.rotation.z = elapsed * 1.8 * (i % 2 === 0 ? 1 : -1);
           }
         }
+        for (let i = 0; i < 6; i++) {
+          const mac = entry.houseGroup.getObjectByName(`candyMacaron_${i}`);
+          if (mac) {
+            const a = (i / 6) * Math.PI * 2 + elapsed * 0.55;
+            mac.position.set(
+              Math.cos(a) * 3.4,
+              9.6 + Math.sin(elapsed * 2.8 + i) * 0.28,
+              Math.sin(a) * 3.4,
+            );
+            mac.rotation.y = elapsed * 1.4;
+          }
+        }
       } else if (entry.shelter.kind === 'blossom') {
         const apex = entry.houseGroup.getObjectByName('blossomApex');
         if (apex) {
           apex.rotation.y = elapsed * 1.3;
-          apex.position.y = 4.8 + Math.sin(elapsed * 2.0) * 0.18;
+          apex.position.y = 7.9 + Math.sin(elapsed * 2.0) * 0.2;
+        }
+        const crownRing = entry.houseGroup.getObjectByName('blossomCrownRing');
+        if (crownRing) {
+          crownRing.rotation.z = elapsed * 0.7;
         }
         const leftWing = entry.houseGroup.getObjectByName('blossomWingLeft');
         const rightWing = entry.houseGroup.getObjectByName('blossomWingRight');
@@ -1774,7 +2613,7 @@ export class Shelter3DView {
         for (let i = 0; i < 8; i++) {
           const pollen = entry.houseGroup.getObjectByName(`blossomPollen_${i}`);
           if (pollen) {
-            pollen.position.y = 1.2 + (i % 4) * 0.8 + Math.sin(elapsed * 2.5 + i) * 0.25;
+            pollen.position.y = 2.0 + (i % 4) * 0.95 + Math.sin(elapsed * 2.5 + i) * 0.28;
             pollen.rotation.y = elapsed * 1.5;
           }
         }
@@ -1784,11 +2623,15 @@ export class Shelter3DView {
           apex.rotation.y = elapsed * 2.0;
           apex.rotation.x = Math.sin(elapsed * 1.2) * 0.2;
         }
+        const orbitA = entry.houseGroup.getObjectByName('starlightOrbitRingA');
+        const orbitB = entry.houseGroup.getObjectByName('starlightOrbitRingB');
+        if (orbitA) orbitA.rotation.z = elapsed * 0.9;
+        if (orbitB) orbitB.rotation.z = -elapsed * 1.15;
         const ring = entry.houseGroup.getObjectByName('constellationRing');
         if (ring) {
           ring.rotation.z = elapsed * 0.2;
         }
-        for (let i = 0; i < 4; i++) {
+        for (let i = 0; i < 6; i++) {
           const crescent = entry.houseGroup.getObjectByName(`moonCrescent_${i}`);
           if (crescent) {
             crescent.rotation.z = Math.sin(elapsed * 2.0 + i) * 0.15;
@@ -1796,22 +2639,22 @@ export class Shelter3DView {
         }
       }
 
-      // Protective Dome visual pulsation
-      const baseOpacity = 0.18;
+      // Protective Dome visual pulsation (crystal-clear at rest, bright when active)
+      const baseOpacity = 0.1;
       const insidePulse = Math.sin(elapsed * 3.5) * 0.08;
       const warningPulse = isWarning ? Math.sin(elapsed * 8.0) * 0.12 : 0;
       const strikeFlash = entry.strikeLevel * 0.55;
 
       const domeOpacity =
         baseOpacity +
-        entry.insideLevel * 0.32 +
+        entry.insideLevel * 0.34 +
         insidePulse * entry.insideLevel +
         warningPulse +
         strikeFlash;
-      entry.domeMat.opacity = Math.min(0.92, Math.max(0.12, domeOpacity));
+      entry.domeMat.opacity = Math.min(0.92, Math.max(0.08, domeOpacity));
 
       // Emissive glow modulation
-      const baseEmissive = 0.22;
+      const baseEmissive = 0.18;
       entry.domeMat.emissiveIntensity =
         baseEmissive +
         entry.insideLevel * 0.55 +
@@ -1820,7 +2663,7 @@ export class Shelter3DView {
 
       // Lattice rotation
       entry.domeLattice.rotation.y = elapsed * 0.15;
-      entry.domeLatticeMat.opacity = 0.1 + entry.insideLevel * 0.25 + entry.strikeLevel * 0.4;
+      entry.domeLatticeMat.opacity = 0.07 + entry.insideLevel * 0.25 + entry.strikeLevel * 0.4;
 
       // Ground safety ring: pulses brightly and rotates slowly
       entry.groundRing.rotation.z = elapsed * 0.25;
@@ -1829,10 +2672,10 @@ export class Shelter3DView {
       entry.groundRingMat.opacity =
         0.4 + entry.insideLevel * 0.45 + ringPulse + warningRingPulse + entry.strikeLevel * 0.5;
 
-      // Color shift when inside (soothing warm golden/pastel radiance)
+      // Color shift when inside (soothing warm golden/pastel radiance, zero-GC)
       if (entry.insideLevel > 0.05) {
         COLOR_SCRATCH.setHex(entry.shelter.colorHex).lerp(
-          new Color(0xfff0aa),
+          WARM_SHELTER_GOLD,
           entry.insideLevel * 0.4,
         );
         entry.groundRingMat.color.copy(COLOR_SCRATCH);
@@ -1845,11 +2688,23 @@ export class Shelter3DView {
         entry.insideLevel * 0.38 * (0.8 + Math.sin(elapsed * 4.5) * 0.2);
       entry.auraPillar.rotation.y = -elapsed * 0.5;
 
-      // Sky guidance beacon beam (only during warning, guides players from across the arena!)
+      // Sky guidance beacon beam: permanent soft pastel spire for Grand Castles, bright gold during warning
+      const isGrandPalace =
+        entry.shelter.kind === 'castle' ||
+        entry.shelter.kind === 'mermaid' ||
+        entry.shelter.kind === 'candy' ||
+        entry.shelter.kind === 'blossom' ||
+        entry.shelter.kind === 'starlight';
+      const restingBeacon = isGrandPalace ? 0.085 + 0.025 * Math.sin(elapsed * 1.8) : 0;
       if (entry.warningLevel > 0.05) {
         const beaconPulse = 0.45 + Math.sin(elapsed * 6.0) * 0.3;
-        entry.beaconBeamMat.opacity = entry.warningLevel * beaconPulse;
+        entry.beaconBeamMat.color.setHex(0xffea78);
+        entry.beaconBeamMat.opacity = Math.max(restingBeacon, entry.warningLevel * beaconPulse);
         entry.beaconBeam.rotation.y = elapsed * 0.8;
+      } else if (restingBeacon > 0) {
+        entry.beaconBeamMat.color.setHex(entry.shelter.colorHex);
+        entry.beaconBeamMat.opacity = restingBeacon;
+        entry.beaconBeam.rotation.y = elapsed * 0.35;
       } else {
         entry.beaconBeamMat.opacity = 0;
       }

@@ -2747,3 +2747,84 @@ test('🏡⚡ Snake Shelters & Sky Monster Calamity: renders shelter houses, ale
   expect(externalRequests).toEqual([]);
   expect(errors, errors.join('\n')).toEqual([]);
 });
+
+test('Guardian Fairy visitor banner, princess preset chips, and zero HUD overlap at 1280x800', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const { errors, apiRequests, externalRequests } = attachErrorWatchers(page);
+
+  await page.goto('/');
+
+  // Princess nickname preset chip updates player name input
+  const princessChip = page.getByRole('button', { name: /Công Chúa/ });
+  const fairyChip = page.getByRole('button', { name: /Tiên Nhỏ/ });
+  await expect(princessChip).toBeVisible();
+  await expect(fairyChip).toBeVisible();
+  await princessChip.click();
+  await expect(page.locator('#player-name-input')).toHaveValue('Công Chúa');
+
+  await page.getByRole('button', { name: /Thư Giãn Xuyên Tường/ }).click();
+  await page.getByRole('button', { name: /Dễ \(Làm quen\)/ }).click();
+  await cta(page).click();
+  await expect(overlay(page)).toHaveClass(/hidden/);
+
+  // Spawn Guardian Fairy via debug hook and verify banner + zero HUD overlaps
+  const fairyBanner = page.locator('#fairy-visitor-banner');
+  await expect(fairyBanner).toBeHidden();
+
+  const spawned = await page.evaluate(() => {
+    const hook = window.__snakeGame as
+      | { spawnGuardianFairyForTest?: (kind?: string) => { kind: string; nameVi: string } | null }
+      | undefined;
+    return hook?.spawnGuardianFairyForTest?.('blossom') ?? null;
+  });
+  expect(spawned).not.toBeNull();
+  expect(spawned!.kind).toBe('blossom');
+
+  await expect(fairyBanner).toBeVisible();
+  await expect(fairyBanner).toContainText('Tiên Hoa Hồng');
+
+  const layout = await page.evaluate(() => {
+    type Box = { name: string; left: number; top: number; right: number; bottom: number };
+    const readBox = (selector: string): Box | null => {
+      const el = document.querySelector<HTMLElement>(selector);
+      if (!el || el.classList.contains('hidden')) return null;
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) return null;
+      return { name: selector, left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+    };
+    const overlap = (a: Box, b: Box): boolean =>
+      Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 &&
+      Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1;
+
+    const boxes = [
+      '#hud-top .hud-left-col',
+      '#hud-top .hud-right-col',
+      '#shelter-alerts-container',
+      '#top-hud-stack',
+      '#booster-buttons',
+      '#crown-radar',
+      '#shelter-radar',
+      '#magic-bar',
+      '#fairy-skills',
+    ]
+      .map(readBox)
+      .filter((b): b is Box => b !== null);
+
+    const overlaps: string[] = [];
+    for (let i = 0; i < boxes.length; i += 1) {
+      for (let j = i + 1; j < boxes.length; j += 1) {
+        const a = boxes[i]!;
+        const b = boxes[j]!;
+        if (overlap(a, b)) overlaps.push(`${a.name} <-> ${b.name}`);
+      }
+    }
+    return { overlaps };
+  });
+
+  expect(layout.overlaps).toEqual([]);
+  expect(apiRequests).toEqual([]);
+  expect(externalRequests).toEqual([]);
+  expect(errors, errors.join('\n')).toEqual([]);
+});

@@ -113,6 +113,9 @@ const RUMBLE_PRESETS: Readonly<Partial<Record<GameEventKind, RumbleSpec>>> = {
   aoe_fire: { duration: 220, weakMagnitude: 0.85, strongMagnitude: 0.7 },
   aoe_water: { duration: 210, weakMagnitude: 0.78, strongMagnitude: 0.65 },
   aoe_arcane: { duration: 230, weakMagnitude: 0.88, strongMagnitude: 0.72 },
+  fairy_visit_start: { duration: 150, weakMagnitude: 0.55, strongMagnitude: 0.25 },
+  fairy_blessing: { duration: 70, weakMagnitude: 0.36, strongMagnitude: 0.12 },
+  fairy_visit_end: { duration: 90, weakMagnitude: 0.3, strongMagnitude: 0.12 },
 };
 
 const CHOMP_RUMBLE_DURATION_MS = 38;
@@ -205,6 +208,9 @@ const LIGHTBAR_EVENT_FLASHES: Readonly<Partial<Record<GameEventKind, LightbarFla
   booster_activate: { rgb: [255, 220, 74], durationMs: 340 },
   dash: { rgb: [96, 212, 255], durationMs: 220 },
   eat_bonus: { rgb: [255, 216, 84], durationMs: 220 },
+  fairy_visit_start: { rgb: [255, 165, 230], durationMs: 520 },
+  fairy_blessing: { rgb: [255, 224, 128], durationMs: 280 },
+  fairy_visit_end: { rgb: [215, 168, 255], durationMs: 360 },
 };
 
 const LIGHTBAR_EVENT_COLORS: Readonly<Partial<Record<GameEventKind, RgbColor>>> = {

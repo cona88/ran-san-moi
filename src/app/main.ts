@@ -10,6 +10,8 @@ import type {
   GameAction,
   GameMode,
   GameState,
+  GuardianFairyKind,
+  GuardianFairyState,
   Hazard,
   QuestKind,
   SnakeForm,
@@ -59,6 +61,7 @@ import {
   loadUnlockedAchievements,
 } from '../platform/achievements';
 import { spawnQuest } from '../core/quests';
+import { spawnGuardianFairyNow } from '../core/guardianFairy';
 
 /** Fraction of a tick after which a fresh turn snaps forward for crisp steering. */
 const STEP_AHEAD = 0.5;
@@ -78,6 +81,7 @@ export interface SnakeGameTestHook {
     readonly hazardId: number;
   } | null;
   readonly spawnQuestForTest: (kind?: QuestKind) => BrainQuest | null;
+  readonly spawnGuardianFairyForTest?: (kind?: GuardianFairyKind) => GuardianFairyState | null;
 }
 
 declare global {
@@ -461,7 +465,8 @@ function bootstrap(): void {
       next.lightningBolts !== prev.lightningBolts ||
       next.aoeBlasts !== prev.aoeBlasts ||
       next.silkWebs !== prev.silkWebs ||
-      next.frostZones !== prev.frostZones
+      next.frostZones !== prev.frostZones ||
+      next.guardianFairy !== prev.guardianFairy
     ) {
       renderer.syncProjectiles(next);
     }
@@ -669,11 +674,22 @@ function bootstrap(): void {
     return spawned.quest;
   }
 
+  function spawnGuardianFairyForTest(kind?: GuardianFairyKind): GuardianFairyState | null {
+    if (state.phase !== 'playing') return null;
+    const prev = state;
+    const next = spawnGuardianFairyNow(prev, kind);
+    if (next === prev) return null;
+    state = next;
+    onStateChange(prev, next);
+    return state.guardianFairy;
+  }
+
   window.__snakeGame = {
     getState: () => state,
     placeEdibleBotAheadForTest,
     placeFrostTargetsAheadForTest,
     spawnQuestForTest,
+    spawnGuardianFairyForTest,
   };
 
   renderer.sync(state);

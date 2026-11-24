@@ -28,8 +28,8 @@ import { cameraFitDistance } from './cameraFit';
 import { THEMES } from './palette';
 
 const FOV = 50;
-const FOG_NEAR = 34;
-const FOG_FAR = 86;
+const FOG_NEAR = 44;
+const FOG_FAR = 128;
 const MAX_LOOK_OFFSET = 4.2;
 const AMBIENT_PARTICLE_COUNT = 84;
 const SNAP_DISTANCE_SQ = 12 * 12;
@@ -143,7 +143,7 @@ export class SceneRig {
     this.fog = new Fog(palette.fogColor, FOG_NEAR, FOG_FAR);
     this.scene.fog = this.fog;
 
-    this.camera = new PerspectiveCamera(FOV, w / h, 0.1, 260);
+    this.camera = new PerspectiveCamera(FOV, w / h, 0.1, 340);
 
     this.ambientLight = new AmbientLight(palette.ambientColor, palette.ambientIntensity);
     this.scene.add(this.ambientLight);

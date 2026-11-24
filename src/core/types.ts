@@ -88,6 +88,28 @@ export interface FrostZone {
 export type ShelterKind =
   'castle' | 'mushroom' | 'crystal' | 'mermaid' | 'candy' | 'blossom' | 'starlight';
 
+export type GuardianFairyKind = 'blossom' | 'starlight' | 'crystal' | 'rainbow';
+export type GuardianFairyPhase = 'idle' | 'arriving' | 'escorting' | 'departing';
+
+export interface GuardianFairyState {
+  readonly phase: GuardianFairyPhase;
+  readonly kind: GuardianFairyKind;
+  readonly nameVi: string;
+  readonly emoji: string;
+  readonly blessingVi: string;
+  readonly colorHex: number;
+  readonly accentHex: number;
+  readonly pos: Vec2;
+  readonly altitude: number;
+  readonly heading: number;
+  readonly ticksRemaining: number;
+  readonly maxTicks: number;
+  readonly ticksUntilNextVisit: number;
+  readonly distanceTraveled: number;
+  readonly visitCount: number;
+  readonly blessingPulseTick: number;
+}
+
 export interface ShelterHouse {
   readonly id: string;
   readonly kind: ShelterKind;
@@ -310,7 +332,10 @@ export type GameEventKind =
   | 'monster_strike'
   | 'shelter_enter'
   | 'shelter_exit'
-  | 'shelter_discovered';
+  | 'shelter_discovered'
+  | 'fairy_visit_start'
+  | 'fairy_blessing'
+  | 'fairy_visit_end';
 
 export interface GameEvent {
   readonly id: number;
@@ -432,6 +457,8 @@ export interface GameState {
   readonly inShelter: boolean;
   readonly currentShelterId: string | null;
   readonly shelteredTicks: number;
+  readonly shelterHealUsedId: string | null;
+  readonly guardianFairy: GuardianFairyState;
 }
 
 export type GameAction =

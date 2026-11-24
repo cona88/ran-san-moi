@@ -269,6 +269,15 @@ export class Sfx {
       case 'shelter_discovered':
         this.playShelterDiscovered(baseOffset);
         return;
+      case 'fairy_visit_start':
+        this.playFairyVisitStart(baseOffset);
+        return;
+      case 'fairy_blessing':
+        this.playFairyBlessing(baseOffset);
+        return;
+      case 'fairy_visit_end':
+        this.playFairyVisitEnd(baseOffset);
+        return;
       default: {
         const exhaustive: never = kind;
         return exhaustive;
@@ -1118,10 +1127,12 @@ export class Sfx {
         delay: harpNotes.length * 0.045,
         startHz: 1567.98,
         duration: 0.6,
-        attack: 0.004,
-        gain: 0.1,
-        type: 'triangle',
-        pan: 0.15,
+        attack: 0.005,
+        gain: 0.14,
+        type: 'sine',
+        overtoneRatio: 1.5,
+        overtoneGain: 0.15,
+        shimmer: 0.5,
       },
       {
         delay: harpNotes.length * 0.045,
@@ -1132,6 +1143,65 @@ export class Sfx {
         type: 'sine',
         pan: -0.15,
       },
+    ]);
+  }
+
+  /** Dreamy ascending fairy harp & celesta arpeggio when a Guardian Fairy visits. */
+  playFairyVisitStart(offset = 0): void {
+    this.scheduleNoiseBurst(offset, 0.28, 2800, 6800, 0.042, 'highpass', 0.012, 1.3, 0.45, 0);
+    const notes = [523.25, 659.25, 783.99, 987.77, 1174.66, 1567.98];
+    this.scheduleTones(offset, [
+      ...notes.map((hz, i) => ({
+        delay: i * 0.048,
+        startHz: hz,
+        duration: i >= notes.length - 1 ? 0.52 : 0.3,
+        attack: 0.004,
+        gain: 0.115,
+        type: 'sine' as const,
+        overtoneRatio: 2,
+        overtoneGain: 0.16,
+        pan: (i / (notes.length - 1)) * 0.56 - 0.28,
+        shimmer: 0.46,
+      })),
+    ]);
+  }
+
+  /** Sweet twinkling 3-note magic wand blessing chime. */
+  playFairyBlessing(offset = 0): void {
+    this.scheduleNoiseBurst(offset, 0.14, 3200, 6200, 0.028, 'highpass', 0.008, 1.2, 0.4, 0);
+    const chime = [987.77, 1318.51, 1567.98];
+    this.scheduleTones(offset, [
+      ...chime.map((hz, i) => ({
+        delay: i * 0.045,
+        startHz: hz,
+        duration: 0.24,
+        attack: 0.004,
+        gain: 0.095,
+        type: 'sine' as const,
+        overtoneRatio: 2,
+        overtoneGain: 0.12,
+        pan: (i - 1) * 0.22,
+        shimmer: 0.44,
+      })),
+    ]);
+  }
+
+  /** Soft descending lullaby harp glissando when a Guardian Fairy waves goodbye. */
+  playFairyVisitEnd(offset = 0): void {
+    const notes = [1318.51, 1174.66, 987.77, 783.99];
+    this.scheduleTones(offset, [
+      ...notes.map((hz, i) => ({
+        delay: i * 0.06,
+        startHz: hz,
+        duration: i === notes.length - 1 ? 0.42 : 0.24,
+        attack: 0.006,
+        gain: 0.09,
+        type: 'sine' as const,
+        overtoneRatio: 2,
+        overtoneGain: 0.1,
+        pan: 0.24 - i * 0.16,
+        shimmer: 0.42,
+      })),
     ]);
   }
 

@@ -165,6 +165,8 @@ export class HudBar {
   private lastHoldingButterfly = false;
 
   private readonly alertsContainer: HTMLElement;
+  private readonly fairyVisitorEl: HTMLElement;
+  private readonly fairyVisitorText: HTMLElement;
   private readonly castleDiscoveryToastEl: HTMLElement;
   private readonly castleDiscoveryToastText: HTMLElement;
   private readonly monsterAlertEl: HTMLElement;
@@ -178,6 +180,7 @@ export class HudBar {
   private readonly shelterRadarText: HTMLElement;
   private readonly shelterRadarProgress: HTMLElement;
 
+  private lastFairyBannerKey = '';
   private lastMonsterAlertKey = '';
   private lastSafeShelterKey = '';
   private lastShelterRadarKey = '';
@@ -387,7 +390,19 @@ export class HudBar {
     this.rootEl = el('header', { id: 'hud-top' }, leftColEl, this.rightColEl);
     parent.appendChild(this.rootEl);
 
-    // Alerts container (Castle Discovery Toast + Monster Alert Banner + Safe Shelter Indicator)
+    // Alerts container (Guardian Fairy Banner + Castle Discovery Toast + Monster Alert Banner + Safe Shelter Indicator)
+    this.fairyVisitorText = el('span', { className: 'fairy-visitor-text', text: '' });
+    this.fairyVisitorEl = el(
+      'div',
+      {
+        id: 'fairy-visitor-banner',
+        className: 'fairy-visitor-banner hidden',
+        ariaLabel: 'Nàng Tiên Bảo Vệ đang đồng hành',
+      },
+      this.fairyVisitorText,
+    );
+    this.fairyVisitorEl.setAttribute('role', 'status');
+
     this.castleDiscoveryToastText = el('span', {
       className: 'castle-discovery-toast-text',
       text: '',
@@ -433,6 +448,7 @@ export class HudBar {
     this.alertsContainer = el(
       'div',
       { id: 'shelter-alerts-container', className: 'shelter-alerts-container' },
+      this.fairyVisitorEl,
       this.castleDiscoveryToastEl,
       this.monsterAlertEl,
       this.safeShelterEl,
@@ -737,6 +753,10 @@ export class HudBar {
         this.castleDiscoveryTimer = null;
       }
       this.castleDiscoveryToastEl.classList.add('hidden');
+      if (this.lastFairyBannerKey !== 'hidden') {
+        this.lastFairyBannerKey = 'hidden';
+        this.fairyVisitorEl.classList.add('hidden');
+      }
       if (this.lastMonsterAlertKey !== 'hidden') {
         this.lastMonsterAlertKey = 'hidden';
         this.monsterAlertEl.classList.add('hidden');
@@ -768,6 +788,21 @@ export class HudBar {
         }
       }
       this.lastDiscoveredCount = discovered.length;
+    }
+
+    // 0b. Guardian Fairy Visitor Banner
+    const fairy = state.guardianFairy;
+    const showFairy = Boolean(fairy && (fairy.phase === 'arriving' || fairy.phase === 'escorting'));
+    const fairySec = showFairy && fairy ? Math.max(1, Math.ceil(fairy.ticksRemaining / 20)) : 0;
+    const fairyKey = showFairy && fairy ? `${fairy.phase}|${fairy.kind}|${fairySec}` : 'hidden';
+    if (fairyKey !== this.lastFairyBannerKey) {
+      this.lastFairyBannerKey = fairyKey;
+      if (showFairy && fairy) {
+        this.fairyVisitorText.textContent = `${fairy.emoji} ${fairy.nameVi} đang bảo vệ bé! • ${fairy.blessingVi} (${fairySec}s) ✨`;
+        this.fairyVisitorEl.classList.remove('hidden');
+      } else {
+        this.fairyVisitorEl.classList.add('hidden');
+      }
     }
 
     // 1. Monster Alert Banner
@@ -873,10 +908,30 @@ export class HudBar {
       return;
     }
 
-    let nearest: ShelterHouse = shelters[0]!;
+    const isDanger = (isWarning || isStrike) && !inShelter;
+    const discoveredIds = new Set(discovered);
+    const grandKinds = new Set(['mermaid', 'candy', 'blossom', 'starlight']);
+
+    // During peaceful exploration, guide daughter toward undiscovered Grand Wonder Palaces (or undiscovered sanctuaries)
+    let radarTargetPool: readonly ShelterHouse[] = shelters;
+    if (!inShelter && !isDanger) {
+      const undiscoveredGrand = shelters.filter(
+        (s) => grandKinds.has(s.kind) && !discoveredIds.has(s.id),
+      );
+      if (undiscoveredGrand.length > 0) {
+        radarTargetPool = undiscoveredGrand;
+      } else {
+        const undiscoveredAny = shelters.filter((s) => !discoveredIds.has(s.id));
+        if (undiscoveredAny.length > 0) {
+          radarTargetPool = undiscoveredAny;
+        }
+      }
+    }
+
+    let nearest: ShelterHouse = radarTargetPool[0]!;
     let minDist = Math.hypot(nearest.x - head.x, nearest.z - head.z);
-    for (let i = 1; i < shelters.length; i++) {
-      const s = shelters[i]!;
+    for (let i = 1; i < radarTargetPool.length; i++) {
+      const s = radarTargetPool[i]!;
       const d = Math.hypot(s.x - head.x, s.z - head.z);
       if (d < minDist) {
         minDist = d;
@@ -889,12 +944,12 @@ export class HudBar {
     const dz = nearest.z - head.z;
     const angleRad = Math.atan2(dz, dx);
     const angleRounded = Number(angleRad.toFixed(2));
-    const isDanger = (isWarning || isStrike) && !inShelter;
+    const isNewTarget = !inShelter && !isDanger && !discoveredIds.has(nearest.id);
     const totalShelters = shelters.length;
     const discoveredCount =
       (state as { discoveredShelterIds?: readonly string[] }).discoveredShelterIds?.length ??
       (inShelter ? 1 : 0);
-    const radarKey = `${inShelter ? 1 : 0}|${isDanger ? 1 : 0}|${nearest.id}|${distRounded}|${angleRounded}|${discoveredCount}/${totalShelters}`;
+    const radarKey = `${inShelter ? 1 : 0}|${isDanger ? 1 : 0}|${isNewTarget ? 1 : 0}|${nearest.id}|${distRounded}|${angleRounded}|${discoveredCount}/${totalShelters}`;
 
     if (radarKey !== this.lastShelterRadarKey) {
       this.lastShelterRadarKey = radarKey;
@@ -913,7 +968,9 @@ export class HudBar {
         this.shelterRadarIcon.textContent = info.icon;
         this.shelterRadarArrow.classList.remove('hidden');
         this.shelterRadarArrow.style.transform = `rotate(${angleRad.toFixed(3)}rad)`;
-        this.shelterRadarText.textContent = `${info.shortName} • ${distRounded}m`;
+        this.shelterRadarText.textContent = isNewTarget
+          ? `${info.shortName} ✨ Mới • ${distRounded}m`
+          : `${info.shortName} • ${distRounded}m`;
       }
     }
   }

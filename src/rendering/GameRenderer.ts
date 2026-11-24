@@ -6,6 +6,7 @@ import { Board } from './board';
 import { BotsView } from './bots';
 import { FairyMagicView } from './fairyMagic3d';
 import { FoodView } from './food';
+import { GuardianFairy3DView } from './guardianFairy3d';
 import { BadgeTextureCache, CrownResources, Labels3DView } from './labels3d';
 import { ObstaclesView } from './obstacles';
 import { THEMES } from './palette';
@@ -48,6 +49,7 @@ export class GameRenderer {
   private readonly fairyMagic: FairyMagicView;
   private readonly shelterView: Shelter3DView;
   private readonly roamingMonstersView: RoamingMonstersView;
+  private readonly guardianFairyView: GuardianFairy3DView;
 
   private readonly half: number;
   private renderedMargin = -1;
@@ -65,6 +67,7 @@ export class GameRenderer {
   private readonly flowerBurstPos = new Vector3();
   private readonly sprayMuzzlePos = new Vector3();
   private readonly headCamPos = new Vector3();
+  private readonly fairySparkPos = new Vector3();
   private readonly recentSpiritBlooms: Vector3[] = [];
   private dashSparkAcc = 0;
   private bodyTrailAcc = 0;
@@ -73,6 +76,7 @@ export class GameRenderer {
   private fallingIceAcc = 0;
   private cocoonSparkAcc = 0;
   private sprayStreamAcc = 0;
+  private fairySparkAcc = 0;
   private aerialCamAltitude = 0;
 
   constructor(container: HTMLElement, config: GameConfig) {
@@ -90,6 +94,7 @@ export class GameRenderer {
     this.fairyMagic = new FairyMagicView(this.rig.scene, config.maxGrid);
     this.shelterView = new Shelter3DView(this.rig.scene, config.maxGrid);
     this.roamingMonstersView = new RoamingMonstersView(this.rig.scene);
+    this.guardianFairyView = new GuardianFairy3DView(this.rig.scene);
 
     this.setTheme(this.currentTheme);
   }
@@ -134,6 +139,7 @@ export class GameRenderer {
     this.fairyMagic.sync(state);
     this.shelterView.sync(state);
     this.roamingMonstersView.sync(state);
+    this.guardianFairyView.sync(state);
   }
 
   /** Sync projectiles, bots, hazards, quest orbs & world orbs without disturbing snake interpolation. */
@@ -153,6 +159,7 @@ export class GameRenderer {
     this.fairyMagic.sync(state);
     this.shelterView.sync(state);
     this.roamingMonstersView.sync(state);
+    this.guardianFairyView.sync(state);
   }
 
   /** Trigger magical 3D particle bursts, camera shake & zoom pulses in response to a `GameEvent`. */
@@ -451,6 +458,20 @@ export class GameRenderer {
         this.rig.triggerShake(0.2, 0.26);
         this.rig.triggerZoomPulse(-0.04);
         break;
+      case 'fairy_visit_start':
+        this.particles.fireworks(this.eventPos);
+        this.particles.multiRingStarburst(this.eventPos, 0xff80cc, 0xffe066, 22, 5.6, 1.25);
+        this.particles.expandingWave(this.eventPos, 0xff80cc, 4.4, 0.68, 0.35);
+        this.rig.triggerZoomPulse(-0.025);
+        break;
+      case 'fairy_blessing':
+        this.particles.burstStars(this.eventPos, 0xffe66d, 16, 4.4, 0.95, true);
+        this.particles.expandingWave(this.eventPos, 0xff9de6, 3.2, 0.48);
+        break;
+      case 'fairy_visit_end':
+        this.particles.burstStars(this.eventPos, 0xc792ff, 18, 4.0, 1.0, true);
+        this.particles.expandingWave(this.eventPos, 0xffe066, 2.8, 0.45);
+        break;
     }
   }
 
@@ -606,6 +627,30 @@ export class GameRenderer {
       } else {
         this.sprayStreamAcc = 0;
       }
+
+      if (state.guardianFairy?.phase === 'escorting') {
+        this.fairySparkAcc += camDt;
+        if (this.fairySparkAcc >= 0.06) {
+          this.fairySparkAcc %= 0.06;
+          cellToWorld(
+            state.guardianFairy.pos.x,
+            state.guardianFairy.pos.z,
+            this.half,
+            this.fairySparkPos,
+          );
+          this.fairySparkPos.y = 2.6 + (state.guardianFairy.altitude - 1.0) * 5.2;
+          this.particles.burstStars(
+            this.fairySparkPos,
+            state.guardianFairy.colorHex,
+            3,
+            2.4,
+            0.65,
+            true,
+          );
+        }
+      } else {
+        this.fairySparkAcc = 0;
+      }
     } else {
       this.dashSparkAcc = 0;
       this.bodyTrailAcc = 0;
@@ -613,6 +658,7 @@ export class GameRenderer {
       this.fallingIceAcc = 0;
       this.cocoonSparkAcc = 0;
       this.sprayStreamAcc = 0;
+      this.fairySparkAcc = 0;
     }
 
     this.botsView.draw(alpha, elapsed, delta, state);
@@ -623,6 +669,7 @@ export class GameRenderer {
     this.fairyMagic.draw(elapsed, state);
     this.shelterView.draw(elapsed, delta, state);
     this.roamingMonstersView.draw(elapsed, delta, state);
+    this.guardianFairyView.draw(elapsed, delta, state, this.headCamPos);
     this.particles.update(delta);
     this.rig.render();
   }
@@ -654,6 +701,7 @@ export class GameRenderer {
     this.fairyMagic.dispose();
     this.shelterView.dispose();
     this.roamingMonstersView.dispose();
+    this.guardianFairyView.dispose();
     this.badgeCache.dispose();
     this.crownResources.dispose();
     this.board.dispose();

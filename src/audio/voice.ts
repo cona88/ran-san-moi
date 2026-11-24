@@ -89,6 +89,12 @@ export class VoiceHelper {
       case 'aoe_arcane':
         this.speak('Bùng Nổ Ma Thuật!');
         break;
+      case 'fairy_visit_start':
+        this.speak(event.messageVi ?? 'Nàng Tiên ghé thăm bảo vệ bé!');
+        break;
+      case 'shelter_discovered':
+        this.speak('Khám phá lâu đài tuyệt đẹp!');
+        break;
       default:
         break;
     }

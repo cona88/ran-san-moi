@@ -109,7 +109,7 @@ export class GameOverlay {
     });
     this.huntTipEl = el('div', {
       className: 'overlay-hunt-tip',
-      text: '⚔️ Ăn Bot Lv thấp → cướp phép! Phun Lửa/Băng/Nước/Tơ → trói & giảm cấp Bot mạnh!',
+      text: '🧚‍♀️ Các Nàng Tiên bảo vệ sẽ ghé thăm tặng phép màu • 🏰 Khám phá 11 Lâu Đài tráng lệ & săn Bot 360°!',
     });
 
     // --- Age Profile Cards ---
@@ -182,6 +182,26 @@ export class GameOverlay {
       this.playerNameInput.value = 'Bé 9T';
     });
 
+    const chipPrincess = el('button', {
+      className: 'nickname-chip',
+      type: 'button',
+      text: '👑 Công Chúa',
+      ariaLabel: 'Đặt biệt danh Công Chúa',
+    });
+    chipPrincess.addEventListener('click', () => {
+      this.playerNameInput.value = 'Công Chúa';
+    });
+
+    const chipFairy = el('button', {
+      className: 'nickname-chip',
+      type: 'button',
+      text: '🧚‍♀️ Tiên Nhỏ',
+      ariaLabel: 'Đặt biệt danh Tiên Nhỏ',
+    });
+    chipFairy.addEventListener('click', () => {
+      this.playerNameInput.value = 'Tiên Nhỏ';
+    });
+
     this.nicknameRow = el(
       'div',
       { className: 'nickname-row' },
@@ -192,6 +212,8 @@ export class GameOverlay {
       this.playerNameInput,
       chip6,
       chip9,
+      chipPrincess,
+      chipFairy,
     );
     const labelNode = this.nicknameRow.querySelector('label');
     if (labelNode) {

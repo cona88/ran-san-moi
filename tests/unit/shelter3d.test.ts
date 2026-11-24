@@ -417,6 +417,47 @@ describe('Shelter3DView (3D Behemoth / Storm Dragon Rendering)', () => {
 
       view.dispose();
     });
+
+    it('renders grand royal architecture details and decorative waystone arches on Shelter3DView', () => {
+      const scene = new Scene();
+      const view = new Shelter3DView(scene);
+      const baseState = createInitialState();
+
+      view.sync(baseState);
+      view.draw(1.0, 0.016, baseState);
+
+      const internals = view as unknown as {
+        shelterVisuals: readonly {
+          shelter: ShelterHouse;
+          houseGroup: { getObjectByName(name: string): unknown };
+        }[];
+        waystonesGroup: { children: readonly unknown[] };
+      };
+
+      expect(internals.shelterVisuals.length).toBe(11);
+      expect(internals.waystonesGroup.children.length).toBeGreaterThan(0);
+
+      const castle = internals.shelterVisuals.find((v) => v.shelter.kind === 'castle')!;
+      expect(castle.houseGroup.getObjectByName('starFinial')).toBeDefined();
+      expect(castle.houseGroup.getObjectByName('castleCrownHalo')).toBeDefined();
+      expect(castle.houseGroup.getObjectByName('castleFlag_0')).toBeDefined();
+
+      const mermaid = internals.shelterVisuals.find((v) => v.shelter.kind === 'mermaid')!;
+      expect(mermaid.houseGroup.getObjectByName('mermaidPearlHalo')).toBeDefined();
+      expect(mermaid.houseGroup.getObjectByName('mermaidRibbon_0')).toBeDefined();
+
+      const candy = internals.shelterVisuals.find((v) => v.shelter.kind === 'candy')!;
+      expect(candy.houseGroup.getObjectByName('candyMacaron_0')).toBeDefined();
+
+      const blossom = internals.shelterVisuals.find((v) => v.shelter.kind === 'blossom')!;
+      expect(blossom.houseGroup.getObjectByName('blossomCrownRing')).toBeDefined();
+
+      const starlight = internals.shelterVisuals.find((v) => v.shelter.kind === 'starlight')!;
+      expect(starlight.houseGroup.getObjectByName('starlightOrbitRingA')).toBeDefined();
+      expect(starlight.houseGroup.getObjectByName('starlightOrbitRingB')).toBeDefined();
+
+      expect(() => view.dispose()).not.toThrow();
+    });
   });
 
   describe('RoamingMonstersView (3D Roaming Creatures Rendering)', () => {

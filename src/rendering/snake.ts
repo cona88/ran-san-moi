@@ -327,6 +327,32 @@ export class SnakeView {
   private readonly bflyAntennaStemGeo = new CylinderGeometry(0.013, 0.009, 0.46, 6);
   private readonly bflyStarTipGeo = new OctahedronGeometry(0.06, 0);
 
+  // ── Princess Tiara Geometries & Materials ──
+  private readonly tiaraBandGeo = new TorusGeometry(0.24, 0.022, 6, 18, Math.PI);
+  private readonly tiaraCenterGemGeo = new OctahedronGeometry(0.068, 0);
+  private readonly tiaraSideGemGeo = new ConeGeometry(0.036, 0.11, 5);
+  private readonly tiaraGoldMat = new MeshStandardMaterial({
+    color: 0xffe45c,
+    emissive: 0xffb82e,
+    emissiveIntensity: 0.72,
+    metalness: 0.65,
+    roughness: 0.16,
+  });
+  private readonly tiaraPinkGemMat = new MeshStandardMaterial({
+    color: 0xff80d0,
+    emissive: 0xff49b8,
+    emissiveIntensity: 0.88,
+    roughness: 0.14,
+    metalness: 0.3,
+  });
+  private readonly tiaraDiamondMat = new MeshStandardMaterial({
+    color: 0xffffff,
+    emissive: 0x9efaff,
+    emissiveIntensity: 0.88,
+    roughness: 0.1,
+    metalness: 0.4,
+  });
+
   // ── Fairy Butterfly Metamorphosis Materials ──
   private readonly catPomPinkMat = new MeshStandardMaterial({
     color: 0xff9de6,
@@ -498,6 +524,9 @@ export class SnakeView {
   private bflyAntennaStarR!: Mesh;
   private bflyTiaraCenterGem!: Mesh;
 
+  private readonly princessTiaraGroup = new Group();
+  private princessTiaraGem!: Mesh;
+
   private readonly bflyRoseColor = new Color(0xff5ec4);
   private readonly bflySakuraColor = new Color(0xff8fd8);
   private readonly bflyPearlColor = new Color(0xffb8eb);
@@ -601,6 +630,7 @@ export class SnakeView {
     this.buildCaterpillarRig();
     this.buildCocoonRig();
     this.buildButterflyRig();
+    this.buildPrincessTiara();
 
     this.shieldBubble = new Mesh(this.shieldBubbleGeo, this.shieldMaterial);
     this.shieldWire = new Mesh(this.shieldWireGeo, this.shieldWireMat);
@@ -1017,6 +1047,12 @@ export class SnakeView {
     this.bflySpotGoldMat.dispose();
     this.bflyTiaraMat.dispose();
     this.bflyAntennaStarMat.dispose();
+    this.tiaraBandGeo.dispose();
+    this.tiaraCenterGemGeo.dispose();
+    this.tiaraSideGemGeo.dispose();
+    this.tiaraGoldMat.dispose();
+    this.tiaraPinkGemMat.dispose();
+    this.tiaraDiamondMat.dispose();
     this.groundShadowRingGeo.dispose();
     this.groundShadowInnerGeo.dispose();
     this.groundShadowRingMat.dispose();
@@ -1414,6 +1450,27 @@ export class SnakeView {
     this.headGroup.add(this.butterflyRig);
   }
 
+  private buildPrincessTiara(): void {
+    const band = new Mesh(this.tiaraBandGeo, this.tiaraGoldMat);
+    band.position.set(0, 0.36, 0.22);
+    band.rotation.set(-0.26, 0, 0);
+    this.princessTiaraGroup.add(band);
+
+    this.princessTiaraGem = new Mesh(this.tiaraCenterGemGeo, this.tiaraPinkGemMat);
+    this.princessTiaraGem.position.set(0, 0.56, 0.27);
+    this.princessTiaraGem.scale.set(1.0, 1.35, 0.82);
+    this.princessTiaraGroup.add(this.princessTiaraGem);
+
+    for (const xSign of [-1, 1] as const) {
+      const sideGem = new Mesh(this.tiaraSideGemGeo, this.tiaraDiamondMat);
+      sideGem.position.set(xSign * 0.14, 0.47, 0.24);
+      sideGem.rotation.set(0.16, 0, -xSign * 0.34);
+      this.princessTiaraGroup.add(sideGem);
+    }
+
+    this.headGroup.add(this.princessTiaraGroup);
+  }
+
   private computePreyAnticipation(state: GameState): number {
     if (state.phase !== 'playing') return 0;
     const fx = Math.cos(state.heading);
@@ -1732,6 +1789,12 @@ export class SnakeView {
     this.caterpillarRig.visible = stage === 'caterpillar';
     this.cocoonRig.visible = stage === 'cocoon';
     this.butterflyRig.visible = stage === 'butterfly';
+    this.princessTiaraGroup.visible = stage === 'caterpillar' && state.phase !== 'gameover';
+    if (this.princessTiaraGroup.visible) {
+      this.princessTiaraGem.rotation.y = elapsed * 2.2;
+      const tiaraPulse = 0.94 + 0.16 * Math.sin(elapsed * 5.2);
+      this.princessTiaraGem.scale.set(tiaraPulse, 1.35 * tiaraPulse, 0.82 * tiaraPulse);
+    }
 
     // Smoothly tint body & head to pearlescent pink in butterfly form; restore immediately in caterpillar
     if (stage === 'butterfly') {

@@ -585,6 +585,40 @@ export class GameUI {
         this.showToast('Bùng Nổ Ma Thuật!', 'Ánh sao siêu tân tinh tỏa sáng 360°!', '🔮');
         break;
       }
+
+      case 'fairy_visit_start': {
+        const fairy = state.guardianFairy;
+        if (screenPos && fairy) {
+          this.popups.spawnCelebration(
+            screenPos.x,
+            screenPos.y,
+            `✨ ${fairy.emoji} ${fairy.nameVi}!`,
+            '#ff85c0',
+          );
+        }
+        if (fairy) {
+          this.showToast(
+            `${fairy.emoji} ${fairy.nameVi} Ghé Thăm!`,
+            `${fairy.blessingVi} • Bảo vệ bé suốt hành trình ✨`,
+            fairy.emoji,
+          );
+        }
+        break;
+      }
+
+      case 'fairy_blessing': {
+        if (screenPos) {
+          this.popups.spawnCelebration(screenPos.x, screenPos.y, '✨ Phép Tiên!', '#ffe66d');
+        }
+        break;
+      }
+
+      case 'fairy_visit_end': {
+        if (screenPos) {
+          this.popups.spawn(screenPos.x, screenPos.y, '💖 Hẹn gặp lại!', '#ffc2e8');
+        }
+        break;
+      }
     }
   }
 
