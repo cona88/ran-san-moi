@@ -212,8 +212,12 @@ function safeSet(key: string, value: string): void {
   }
 }
 
-export function loadUnlockedAchievements(): Set<string> {
-  const raw = safeGet(UNLOCKED_KEY);
+// Parsed-set cache keyed on the raw stored string: the tracker reads this every game tick,
+// so skip JSON.parse + Set construction while storage is unchanged.
+let cachedRaw: string | null = null;
+let cachedSet: ReadonlySet<string> = new Set();
+
+function parseUnlocked(raw: string | null): ReadonlySet<string> {
   if (!raw) return new Set();
   try {
     const parsed: unknown = JSON.parse(raw);
@@ -225,9 +229,18 @@ export function loadUnlockedAchievements(): Set<string> {
   }
 }
 
+export function loadUnlockedAchievements(): ReadonlySet<string> {
+  const raw = safeGet(UNLOCKED_KEY);
+  if (raw !== cachedRaw) {
+    cachedRaw = raw;
+    cachedSet = parseUnlocked(raw);
+  }
+  return cachedSet;
+}
+
 export function unlockAchievements(ids: readonly string[]): void {
   if (ids.length === 0) return;
-  const merged = loadUnlockedAchievements();
+  const merged = new Set(loadUnlockedAchievements());
   for (const id of ids) merged.add(id);
   safeSet(UNLOCKED_KEY, JSON.stringify([...merged]));
 }

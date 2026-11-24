@@ -470,18 +470,60 @@ export function shrinkOrEliminateHelper(
   return { eliminated: false, bot: updated };
 }
 
+const ORB_GRID_CELL = 20;
+
+/** Uniform grid over orbs (cell = 20u) so per-bot orb queries stay O(nearby) instead of O(all). */
+interface OrbGrid {
+  readonly cells: Map<number, number[]>;
+}
+
+function orbCellKey(cx: number, cz: number): number {
+  return cx * 100003 + cz;
+}
+
+function buildOrbGrid(orbs: readonly WorldOrb[]): OrbGrid {
+  const cells = new Map<number, number[]>();
+  for (let i = 0; i < orbs.length; i++) {
+    const o = orbs[i]!;
+    const key = orbCellKey(Math.floor(o.x / ORB_GRID_CELL), Math.floor(o.z / ORB_GRID_CELL));
+    const bucket = cells.get(key);
+    if (bucket === undefined) cells.set(key, [i]);
+    else bucket.push(i);
+  }
+  return { cells };
+}
+
+/** Call `visit(orbIndex)` for every orb in the 3x3 cells around (x, z) (covers any radius <= 20). */
+function forEachNearbyOrb(
+  grid: OrbGrid,
+  x: number,
+  z: number,
+  visit: (index: number) => void,
+): void {
+  const cx = Math.floor(x / ORB_GRID_CELL);
+  const cz = Math.floor(z / ORB_GRID_CELL);
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dz = -1; dz <= 1; dz++) {
+      const bucket = grid.cells.get(orbCellKey(cx + dx, cz + dz));
+      if (bucket === undefined) continue;
+      for (let k = 0; k < bucket.length; k++) visit(bucket[k]!);
+    }
+  }
+}
+
 /** Compute desired steering heading for a single bot AI. */
 function chooseBotHeading(params: {
   readonly bot: BotSnake;
   readonly allBots: readonly BotSnake[];
   readonly orbs: readonly WorldOrb[];
+  readonly orbGrid: OrbGrid;
   readonly playerSnake: readonly Vec2[];
   readonly playerLevel: number;
   readonly playerProtected: boolean;
   readonly config: GameConfig;
   readonly rng: RngState;
 }): { heading: number; rng: RngState } {
-  const { bot, allBots, orbs, playerSnake, playerLevel, playerProtected, config } = params;
+  const { bot, allBots, orbs, orbGrid, playerSnake, playerLevel, playerProtected, config } = params;
   const wallLimit = Math.max(4, config.worldRadius - 5.5);
 
   // 1. Boundary avoidance
@@ -552,16 +594,22 @@ function chooseBotHeading(params: {
   }
 
   // 4. Orb foraging (prefer loot orbs)
-  let bestOrb: WorldOrb | null = null;
+  let bestIdx = -1;
   let bestScore = 20;
-  for (const o of orbs) {
+  forEachNearbyOrb(orbGrid, bot.head.x, bot.head.z, (i) => {
+    const o = orbs[i]!;
     const d = Math.hypot(o.x - bot.head.x, o.z - bot.head.z);
     const weighted = o.isLoot ? d * 0.45 : d;
-    if (d < 20 && weighted < bestScore) {
+    // Ties resolve to the lowest orb index, identical to a linear scan in array order.
+    if (
+      d < 20 &&
+      (weighted < bestScore || (weighted === bestScore && bestIdx >= 0 && i < bestIdx))
+    ) {
       bestScore = weighted;
-      bestOrb = o;
+      bestIdx = i;
     }
-  }
+  });
+  const bestOrb = bestIdx >= 0 ? orbs[bestIdx]! : null;
   if (bestOrb !== null) {
     return {
       heading: Math.atan2(bestOrb.z - bot.head.z, bestOrb.x - bot.head.x),
@@ -597,6 +645,7 @@ export function stepBots(params: {
   const playerHead = params.playerSnake[0];
   const worldBound = Math.max(2, params.config.worldRadius - 1.2);
   const movedBots: BotSnake[] = [];
+  const orbGrid = buildOrbGrid(params.orbs);
 
   // 1. Move each bot
   for (const bot of params.bots) {
@@ -619,6 +668,7 @@ export function stepBots(params: {
       bot,
       allBots: params.bots,
       orbs: params.orbs,
+      orbGrid,
       playerSnake: params.playerSnake,
       playerLevel: params.playerLevel,
       playerProtected: params.playerProtected,
@@ -670,15 +720,16 @@ export function stepBots(params: {
   const botsAfterOrbs = movedBots.map((bot) => {
     const eatRadius = bot.isBoss ? 1.55 : 1.25;
     let levelGain = 0;
-    for (const o of params.orbs) {
-      if (eatenOrbIds.has(o.id)) continue;
+    forEachNearbyOrb(orbGrid, bot.head.x, bot.head.z, (i) => {
+      const o = params.orbs[i]!;
+      if (eatenOrbIds.has(o.id)) return;
       if (Math.hypot(o.x - bot.head.x, o.z - bot.head.z) <= eatRadius) {
         eatenOrbIds.add(o.id);
         if (o.isLoot || o.id % 6 === 0) {
           levelGain += 1;
         }
       }
-    }
+    });
     if (levelGain === 0) return bot;
     const nextLevel = Math.min(250, bot.level + levelGain);
     const nextMaxLevel = Math.max(bot.maxLevel ?? bot.level, nextLevel);
@@ -716,6 +767,24 @@ export function stepBots(params: {
   // 3. Bot-vs-Bot progressive chomping (stronger bot bites up to 2 segments/tick)
   const workingBots = [...botsAfterOrbs];
   const defeatedIds = new Set<number>();
+  // Broad phase: cached max distance from each bot's head to its spine (NaN = stale).
+  const spineExtent = new Float64Array(workingBots.length).fill(Number.NaN);
+  const extentOf = (idx: number): number => {
+    let e = spineExtent[idx]!;
+    if (Number.isNaN(e)) {
+      const bot = workingBots[idx]!;
+      let maxSq = 0;
+      for (const seg of bot.spine) {
+        const dx = seg.x - bot.head.x;
+        const dz = seg.z - bot.head.z;
+        const dSq = dx * dx + dz * dz;
+        if (dSq > maxSq) maxSq = dSq;
+      }
+      e = Math.sqrt(maxSq);
+      spineExtent[idx] = e;
+    }
+    return e;
+  };
 
   for (let i = 0; i < workingBots.length; i++) {
     if (defeatedIds.has(workingBots[i]!.id)) continue;
@@ -735,6 +804,17 @@ export function stepBots(params: {
       if (weaker.isBoss || weaker.spine.length === 0) continue;
 
       const hitRadius = botCollisionRadius(weaker.level, weaker.isBoss);
+      // Exact conservative reject: neither a spine hit nor a head-vs-chain hit can happen.
+      const headDist = Math.hypot(weaker.head.x - stronger.head.x, weaker.head.z - stronger.head.z);
+      const sweep = Math.hypot(
+        stronger.head.x - stronger.prevHead.x,
+        stronger.head.z - stronger.prevHead.z,
+      );
+      const reach = Math.max(
+        extentOf(weakerIdx) + hitRadius + sweep,
+        extentOf(strongerIdx) + botCollisionRadius(stronger.level, stronger.isBoss),
+      );
+      if (headDist > reach + 1e-6) continue;
       const candidates: { idx: number; dist: number }[] = [];
       for (let idx = 0; idx < weaker.spine.length; idx++) {
         const seg = weaker.spine[idx]!;
@@ -765,6 +845,7 @@ export function stepBots(params: {
           level: nextStrongerLevel,
           maxLevel: Math.max(stronger.maxLevel ?? stronger.level, nextStrongerLevel),
         };
+        spineExtent[strongerIdx] = Number.NaN;
         const scattered = scatterLootOrbs({
           orbs: nextOrbs,
           spine: weaker.spine,
@@ -778,6 +859,7 @@ export function stepBots(params: {
       } else {
         const chomped = applyPartialBotChomp(weaker, eatenIndices, 10);
         workingBots[weakerIdx] = chomped.bot;
+        spineExtent[weakerIdx] = Number.NaN;
         const scattered = scatterLootOrbs({
           orbs: nextOrbs,
           spine: chomped.eatenCells,

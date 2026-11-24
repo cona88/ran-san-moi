@@ -1,6 +1,6 @@
 import type { GameEvent, GameState } from '../core/types';
 import { MagicalMusic } from './music';
-import { Sfx, getSafeAudioContextConstructor, smoothSetGain } from './sfx';
+import { Sfx, disconnectAll, getSafeAudioContextConstructor, smoothSetGain } from './sfx';
 
 export { Sfx } from './sfx';
 export { MagicalMusic } from './music';
@@ -151,20 +151,7 @@ export class SoundEngine {
     this.music.dispose();
     this.sfx.dispose();
 
-    const nodes: (AudioNode | null)[] = [
-      this.sfxGain,
-      this.musicGain,
-      this.masterGain,
-      this.compressor,
-    ];
-    for (const node of nodes) {
-      if (!node) continue;
-      try {
-        node.disconnect();
-      } catch {
-        // Already disconnected
-      }
-    }
+    disconnectAll([this.sfxGain, this.musicGain, this.masterGain, this.compressor]);
 
     if (this.context && this.context.state !== 'closed') {
       void this.context.close().catch(() => {});

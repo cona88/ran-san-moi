@@ -1,5 +1,5 @@
 import type { GamePhase, GameState, SnakeForm } from '../core/types';
-import { midiToHz, smoothSetGain } from './sfx';
+import { disconnectAll, midiToHz, smoothSetGain } from './sfx';
 
 type MusicTimbre = 'celesta' | 'crystal_bell' | 'harp' | 'marimba';
 
@@ -368,6 +368,8 @@ export class MagicalMusic {
   private lastPadForm: SnakeForm | null = null;
   private timerId: ReturnType<typeof setInterval> | null = null;
   private readonly activeSources = new Set<AudioScheduledSourceNode>();
+  /** Last gain target handed to the music bus; skips redundant per-tick automation. */
+  private lastAppliedGain = Number.NaN;
 
   constructor(enabled = true) {
     this.enabled = enabled;
@@ -378,7 +380,7 @@ export class MagicalMusic {
     if (this.disposed) return;
     this.context = context;
     this.musicGain = musicGain;
-    this.applyGainForState();
+    this.applyGainForState(true);
     this.syncScheduler();
   }
 
@@ -425,7 +427,7 @@ export class MagicalMusic {
   /** Immediately re-sync gain and lookahead scheduling once `AudioContext.resume()` completes. */
   onContextResumed(): void {
     if (this.disposed) return;
-    this.applyGainForState();
+    this.applyGainForState(true);
     this.syncScheduler();
     this.pumpSchedule();
   }
@@ -451,11 +453,15 @@ export class MagicalMusic {
     this.musicGain = null;
   }
 
-  private applyGainForState(): void {
+  private applyGainForState(force = false): void {
     const ctx = this.context;
     const gain = this.musicGain;
     if (!ctx || !gain || ctx.state === 'closed') return;
-    smoothSetGain(gain.gain, this.getTargetGain(), ctx.currentTime, 0.22);
+    const target = this.getTargetGain();
+    // updateState runs every game tick; re-anchoring an unchanged target only churns automation events.
+    if (!force && target === this.lastAppliedGain) return;
+    this.lastAppliedGain = target;
+    smoothSetGain(gain.gain, target, ctx.currentTime, 0.22);
   }
 
   private syncScheduler(): void {
@@ -1009,13 +1015,7 @@ export class MagicalMusic {
     this.activeSources.add(src);
     src.onended = () => {
       this.activeSources.delete(src);
-      for (const node of cleanupNodes) {
-        try {
-          node.disconnect();
-        } catch {
-          // Already disconnected
-        }
-      }
+      disconnectAll(cleanupNodes);
     };
     src.start(startTime);
     src.stop(stopTime);

@@ -62,8 +62,22 @@ import {
   spawnBossBot,
   stepBots,
 } from './bots';
+import {
+  FROST_SLOW_MULT,
+  SURVIVAL_HEARTS,
+  applySurvivalConfig,
+  isSurvivalChallenge,
+  stepBotMagic,
+} from './botMagic';
 import { castFairySkill, setButterflyHold, stepFairyMagic } from './fairyMagic';
 import { createInitialGuardianFairy, stepGuardianFairy } from './guardianFairy';
+import {
+  applyPrincessTourSteer,
+  isPrincessActive,
+  princessMoveSpeed,
+  stepPrincess,
+  togglePrincess,
+} from './princess';
 import {
   applyBotShelterFlee,
   createInitialMonsterEvent,
@@ -252,6 +266,20 @@ function syncSnakeLengthToLevel(state: GameState): GameState {
   return { ...state, snake: extended, prevSnake: prevExtended };
 }
 
+/** Apply survival hearts, or undo a previous survival override when the combo no longer applies. */
+function restoreOrApplySurvival(
+  base: GameConfig,
+  stateMode: GameMode,
+  mode: GameMode,
+  difficulty: Difficulty,
+  ageProfile: AgeProfile,
+): GameConfig {
+  const survival = isSurvivalChallenge({ ageProfile, difficulty });
+  if (survival) return applySurvivalConfig(base, { ageProfile, difficulty });
+  if (base.maxHearts === SURVIVAL_HEARTS) return configFor(difficulty, mode ?? stateMode);
+  return base;
+}
+
 /** Build a fresh open-world board while preserving `best`, `eventSeq`, and advancing `rng`. */
 function freshBoard(
   state: GameState,
@@ -266,10 +294,11 @@ function freshBoard(
   const ageProfile = ageProfileOverride ?? state.ageProfile;
   const playerName =
     playerNameOverride !== undefined ? normalizePlayerName(playerNameOverride) : state.playerName;
-  const config =
+  const baseConfig =
     modeOverride !== undefined || difficultyOverride !== undefined
       ? configFor(difficulty, mode)
       : state.config;
+  const config = restoreOrApplySurvival(baseConfig, state.mode, mode, difficulty, ageProfile);
 
   const head: Vec2 = { x: 0, z: 0 };
   const snake = buildStraightSpine(head, 0, config.initialLength);
@@ -345,6 +374,8 @@ function freshBoard(
     questsSolved: 0,
     enemiesDefeated: 0,
     projectiles: [],
+    hostileProjectiles: [],
+    playerSlowTicks: 0,
     silkWebs: [],
     hazards: [],
     quest: null,
@@ -383,6 +414,14 @@ function freshBoard(
     shelteredTicks: 0,
     shelterHealUsedId: null,
     guardianFairy: createInitialGuardianFairy(),
+    princessStage: 'snake',
+    princessTicks: 0,
+    princessMaxTicks: 0,
+    princessAltitude: 0,
+    princessCooldownTicks: 0,
+    princessTourShelterId: null,
+    princessTourAngle: 0,
+    princessTourLaps: 0,
   });
 }
 
@@ -392,11 +431,13 @@ export function createInitialState(options: NewGameOptions = {}): GameState {
   const mode = options.mode ?? 'adventure';
   const ageProfile = options.ageProfile ?? 'age6';
   const playerName = normalizePlayerName(options.playerName);
-  const config =
+  const config = applySurvivalConfig(
     options.config ??
-    (options.difficulty !== undefined || options.mode !== undefined
-      ? configFor(difficulty, mode)
-      : DEFAULT_CONFIG);
+      (options.difficulty !== undefined || options.mode !== undefined
+        ? configFor(difficulty, mode)
+        : DEFAULT_CONFIG),
+    { ageProfile, difficulty },
+  );
   const seed = options.seed ?? 1;
 
   const head: Vec2 = { x: 0, z: 0 };
@@ -473,6 +514,8 @@ export function createInitialState(options: NewGameOptions = {}): GameState {
     questsSolved: 0,
     enemiesDefeated: 0,
     projectiles: [],
+    hostileProjectiles: [],
+    playerSlowTicks: 0,
     silkWebs: [],
     hazards: [],
     quest: null,
@@ -508,6 +551,14 @@ export function createInitialState(options: NewGameOptions = {}): GameState {
     shelteredTicks: 0,
     shelterHealUsedId: null,
     guardianFairy: createInitialGuardianFairy(),
+    princessStage: 'snake',
+    princessTicks: 0,
+    princessMaxTicks: 0,
+    princessAltitude: 0,
+    princessCooldownTicks: 0,
+    princessTourShelterId: null,
+    princessTourAngle: 0,
+    princessTourLaps: 0,
   });
 }
 
@@ -521,7 +572,9 @@ function step(state: GameState): GameState {
   }
 
   // 1. Timers, boosters, absorbed power, and dash energy
-  const isAirborne = state.butterflyStage === 'cocoon' || state.butterflyStage === 'butterfly';
+  const princessActive = isPrincessActive(state);
+  const isAirborne =
+    state.butterflyStage === 'cocoon' || state.butterflyStage === 'butterfly' || princessActive;
   const wasProtected = state.shieldTicks > 0 || state.invulnerableTicks > 0 || isAirborne;
   const speedBoostActive = state.boosters.speed.activeTicks > 0;
   const nextInvuln = Math.max(0, state.invulnerableTicks - 1);
@@ -576,6 +629,9 @@ function step(state: GameState): GameState {
     const diff = angleDiff(state.heading, state.targetHeading);
     nextHeading = normalizeAngle(state.heading + clamp(diff, -TURN_SPEED_RAD, TURN_SPEED_RAD));
   }
+  if (princessActive) {
+    nextHeading = applyPrincessTourSteer(state, head, nextHeading);
+  }
 
   let moveSpeed = config.baseSpeed;
   if (speedBoostActive) {
@@ -585,6 +641,14 @@ function step(state: GameState): GameState {
   }
   if (state.butterflyStage === 'butterfly') {
     moveSpeed = Math.max(moveSpeed, config.baseSpeed * 1.45);
+  }
+  const princessSpeed = princessMoveSpeed(state, config.baseSpeed, head);
+  if (princessSpeed !== null) {
+    moveSpeed = princessSpeed;
+  }
+
+  if (state.playerSlowTicks > 0 && !isAirborne) {
+    moveSpeed *= FROST_SLOW_MULT;
   }
 
   const safeRadius = Math.max(2, config.worldRadius - WORLD_EDGE_PAD);
@@ -665,8 +729,8 @@ function step(state: GameState): GameState {
   if (
     inShelter &&
     currentShelterId !== null &&
-    shelteredTicks === 40 &&
-    nextShelterHealUsedId !== currentShelterId
+    shelteredTicks >= SHELTER_HEAL_FIRST_TICK &&
+    (shelteredTicks - SHELTER_HEAL_FIRST_TICK) % SHELTER_HEAL_INTERVAL_TICKS === 0
   ) {
     nextShelterHealUsedId = currentShelterId;
     if (nextHearts < state.maxHearts) {
@@ -674,7 +738,10 @@ function step(state: GameState): GameState {
       shelterDrafts.push({
         kind: 'heart_gained',
         cell: nextHead,
-        messageVi: '🏰 Ánh sáng Lâu Đài hồi tặng bé +1 Tim phép thuật! 💖',
+        // Only the first heal of a visit carries a toast; later ones stay quiet.
+        ...(shelteredTicks === SHELTER_HEAL_FIRST_TICK
+          ? { messageVi: '🏰 Ánh sáng Lâu Đài hồi phục tim cho bé! +1 💖' }
+          : {}),
       });
     }
   }
@@ -857,12 +924,16 @@ function step(state: GameState): GameState {
 
   // 6. Player vs Bot collisions
   const isFlyingOverhead =
-    working.butterflyStage === 'butterfly' && working.butterflyAltitude >= 0.4;
+    (working.butterflyStage === 'butterfly' && working.butterflyAltitude >= 0.4) || princessActive;
   const headAndNeck = working.snake.slice(0, 4);
   const isFast = state.isDashing || speedBoostActive;
   let tookBotHitThisTick = false;
 
   for (const bot of [...working.bots]) {
+    // The Fairy Princess peacefully flies above everyone — no chomping, no collisions.
+    if (princessActive) {
+      break;
+    }
     if (bot.level <= working.level) {
       const prevHeadPos = config.wrapWalls && outOfBounds ? (working.snake[0] ?? nextHead) : head;
       const streakBefore = working.chompStreak;
@@ -1039,6 +1110,11 @@ function step(state: GameState): GameState {
     }
   }
 
+  working = stepBotMagic(working);
+  if (working.phase === 'gameover') {
+    return working;
+  }
+
   const steppedHazards = stepHazards({
     hazards: working.hazards,
     config,
@@ -1120,6 +1196,7 @@ function step(state: GameState): GameState {
   working = maybeSpawnQuest(working, working.rng);
   working = stepFairyMagic(working);
   working = stepGuardianFairy(working, movedDist);
+  working = stepPrincess(working, head);
   working = applyDifficultyMagicRecovery(working);
   working = stepSilkWebs(working);
   working = syncSnakeLengthToLevel(working);
@@ -1264,6 +1341,17 @@ function activateBooster(state: GameState, booster: BoosterKind): GameState {
  * The single pure reducer. Every state change flows through here; actions are
  * safe no-ops outside the phases where they apply.
  */
+/** Hearts regenerate inside a shelter: first +1 after 15 ticks, then +1 every 20 ticks. */
+export const SHELTER_HEAL_FIRST_TICK = 15;
+export const SHELTER_HEAL_INTERVAL_TICKS = 20;
+
+function clearOnGameover(next: GameState): GameState {
+  return next.phase === 'gameover' &&
+    (next.hostileProjectiles.length > 0 || next.playerSlowTicks > 0)
+    ? { ...next, hostileProjectiles: [], playerSlowTicks: 0 }
+    : next;
+}
+
 export function reduce(state: GameState, action: GameAction): GameState {
   switch (action.type) {
     case 'start':
@@ -1309,7 +1397,7 @@ export function reduce(state: GameState, action: GameAction): GameState {
     }
 
     case 'tick':
-      return state.phase === 'playing' ? step(state) : state;
+      return state.phase === 'playing' ? clearOnGameover(step(state)) : state;
 
     case 'projectile_step':
       return state.phase === 'playing'
@@ -1317,7 +1405,9 @@ export function reduce(state: GameState, action: GameAction): GameState {
         : state;
 
     case 'shoot': {
-      if (state.phase !== 'playing' || state.shootCooldownMs > 0) return state;
+      if (state.phase !== 'playing' || state.shootCooldownMs > 0 || isPrincessActive(state)) {
+        return state;
+      }
       const head = state.snake[0];
       if (!head) return state;
       const ev = appendEvents([], state.eventSeq, [
@@ -1337,7 +1427,7 @@ export function reduce(state: GameState, action: GameAction): GameState {
     }
 
     case 'morph': {
-      if (state.phase !== 'playing') return state;
+      if (state.phase !== 'playing' || isPrincessActive(state)) return state;
       let nextForm = state.form;
       if (action.form !== undefined) {
         nextForm = action.form;
@@ -1427,7 +1517,19 @@ export function reduce(state: GameState, action: GameAction): GameState {
 
     case 'set_age_profile': {
       if (state.ageProfile === action.ageProfile) return state;
-      const next: GameState = { ...state, ageProfile: action.ageProfile, events: [] };
+      let next: GameState = { ...state, ageProfile: action.ageProfile, events: [] };
+      if (state.phase === 'ready') {
+        const config = restoreOrApplySurvival(
+          state.config,
+          state.mode,
+          state.mode,
+          state.difficulty,
+          action.ageProfile,
+        );
+        if (config !== state.config) {
+          next = { ...next, config, hearts: config.initialHearts, maxHearts: config.maxHearts };
+        }
+      }
       if (state.phase === 'playing' && state.quest !== null) {
         // Refresh quest for the new age profile
         const spawned = spawnQuest(next, next.rng);
@@ -1449,12 +1551,17 @@ export function reduce(state: GameState, action: GameAction): GameState {
     }
 
     case 'cast_fairy_skill': {
+      if (isPrincessActive(state)) return state;
       const next = castFairySkill(state, action.skill);
       const scale = difficultyTuningFor(state.difficulty).fairyCooldownScale;
       return scaleNewlyStartedFairyCooldowns(state, next, scale);
     }
 
     case 'set_butterfly_hold':
+      if (action.active && isPrincessActive(state)) return state;
       return setButterflyHold(state, action.active);
+
+    case 'toggle_princess':
+      return togglePrincess(state);
   }
 }

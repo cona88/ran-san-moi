@@ -304,6 +304,15 @@ function bootstrap(): void {
       dispatch({ type: 'set_butterfly_hold', active });
       if (active) ui.flashControlFeedback('skill', 'butterfly');
     },
+    togglePrincess() {
+      sound.unlock();
+      if (state.phase !== 'playing') return;
+      if (state.butterflyHold) {
+        dispatch({ type: 'set_butterfly_hold', active: false });
+      }
+      dispatch({ type: 'toggle_princess' });
+      ui.flashControlFeedback('princess');
+    },
     cameraLook(nx: number, ny: number) {
       renderer.setCameraLook(nx, ny);
     },
@@ -386,6 +395,9 @@ function bootstrap(): void {
     onSpeakQuest() {
       voice.speakQuest(state.quest);
     },
+    onTogglePrincess() {
+      controls.togglePrincess();
+    },
   };
 
   const ui = new GameUI(uiRoot, uiCallbacks, currentSettings);
@@ -451,12 +463,14 @@ function bootstrap(): void {
       next.pendingShrink !== prev.pendingShrink ||
       next.config !== prev.config ||
       next.butterflyStage !== prev.butterflyStage ||
+      next.princessStage !== prev.princessStage ||
       next.sprayActiveTicks !== prev.sprayActiveTicks;
 
     if (needsFullSync) {
       renderer.sync(next);
     } else if (
       next.projectiles !== prev.projectiles ||
+      next.hostileProjectiles !== prev.hostileProjectiles ||
       next.hazards !== prev.hazards ||
       next.quest !== prev.quest ||
       next.food !== prev.food ||
@@ -700,6 +714,9 @@ function bootstrap(): void {
   let lastFrame = performance.now();
   let rafId = 0;
 
+  const projectWorld = (x: number, z: number, out: { x: number; y: number }): boolean =>
+    renderer.projectWorld(x, z, out);
+
   function frame(now: number): void {
     rafId = requestAnimationFrame(frame);
 
@@ -752,6 +769,7 @@ function bootstrap(): void {
     }
 
     renderer.draw(alpha, projectileAlpha, now / 1000, dtMs / 1000, state);
+    ui.updateSurvivalThreats(state, projectWorld);
   }
 
   rafId = requestAnimationFrame(frame);

@@ -1,4 +1,4 @@
-import type { GameEvent, GameEventKind, GameState, SnakeForm } from '../core/types';
+import type { BotMagicKind, GameEvent, GameEventKind, GameState, SnakeForm } from '../core/types';
 
 export type AudioContextCtor = typeof AudioContext;
 
@@ -30,6 +30,18 @@ export function smoothSetGain(
     param.setTargetAtTime(safeTarget, now, timeConstant);
   } else {
     param.value = safeTarget;
+  }
+}
+
+/** Disconnect every node, ignoring nodes that are already disconnected. */
+export function disconnectAll(nodes: readonly (AudioNode | null)[]): void {
+  for (const node of nodes) {
+    if (!node) continue;
+    try {
+      node.disconnect();
+    } catch {
+      // Already disconnected
+    }
   }
 }
 
@@ -126,16 +138,6 @@ export class Sfx {
     if (ctx && ctx.state === 'suspended') {
       void ctx.resume().catch(() => {});
     }
-  }
-
-  /** Rising xylophone chime when food is eaten (standalone helper). */
-  eat(): void {
-    this.playEatFood(1);
-  }
-
-  /** Gentle encouraging cadence on game over (standalone helper). */
-  crash(): void {
-    this.playGameOver(false);
   }
 
   /** Play the magical sound effect corresponding to a {@link GameEvent}. */
@@ -277,6 +279,30 @@ export class Sfx {
         return;
       case 'fairy_visit_end':
         this.playFairyVisitEnd(baseOffset);
+        return;
+      case 'princess_transform':
+        this.playPrincessTransform(baseOffset);
+        return;
+      case 'princess_reveal':
+        this.playPrincessReveal(baseOffset);
+        return;
+      case 'princess_return':
+        this.playPrincessReturn(baseOffset);
+        return;
+      case 'princess_tour_start':
+        this.playShelterEnter(baseOffset);
+        return;
+      case 'princess_tour_lap':
+        this.playPrincessTourLap(baseOffset);
+        return;
+      case 'bot_shoot':
+        this.playBotShoot(event.spell ?? 'bolt', baseOffset);
+        return;
+      case 'bot_spell_cast':
+        this.playBotSpellCast(event.spell ?? 'arcane_homing', baseOffset);
+        return;
+      case 'player_hit_by_magic':
+        this.playPlayerHitByMagic(event.spell ?? 'bolt', baseOffset);
         return;
       default: {
         const exhaustive: never = kind;
@@ -1182,6 +1208,126 @@ export class Sfx {
         overtoneGain: 0.12,
         pan: (i - 1) * 0.22,
         shimmer: 0.44,
+      })),
+    ]);
+  }
+
+  /** Rising shimmering magical glissando + warm swelling chord while the snake transforms. */
+  playPrincessTransform(offset = 0): void {
+    this.scheduleNoiseBurst(offset, 1.2, 1200, 7600, 0.05, 'bandpass', 0.35, 1.6, 0.5, -0.2);
+    this.scheduleNoiseBurst(offset + 0.2, 1.0, 2400, 8200, 0.036, 'highpass', 0.3, 1.2, 0.5, 0.2);
+    const gliss = [
+      392.0, 440.0, 523.25, 587.33, 659.25, 783.99, 880.0, 1046.5, 1174.66, 1318.51, 1567.98,
+      1760.0,
+    ];
+    this.scheduleTones(offset, [
+      // Warm swelling pad chord (C major add9)
+      ...[261.63, 329.63, 392.0, 587.33].map((hz, i) => ({
+        delay: 0,
+        startHz: hz,
+        duration: 1.5,
+        attack: 0.55,
+        gain: 0.06,
+        type: 'triangle' as const,
+        filterHz: 1800,
+        pan: (i - 1.5) * 0.18,
+        shimmer: 0.4,
+      })),
+      // Ascending sparkle glissando
+      ...gliss.map((hz, i) => ({
+        delay: 0.05 + i * 0.11,
+        startHz: hz,
+        duration: 0.32,
+        attack: 0.004,
+        gain: 0.085,
+        type: 'sine' as const,
+        overtoneRatio: 2,
+        overtoneGain: 0.14,
+        pan: Math.sin(i * 0.9) * 0.4,
+        shimmer: 0.5,
+      })),
+    ]);
+  }
+
+  /** Glorious sparkling bell fanfare when the Fairy Princess is revealed. */
+  playPrincessReveal(offset = 0): void {
+    this.scheduleNoiseBurst(offset, 0.5, 3000, 9000, 0.06, 'highpass', 0.01, 1.3, 0.5, 0);
+    const chord = [523.25, 659.25, 783.99, 1046.5];
+    const bells = [1318.51, 1567.98, 2093.0, 2637.02, 3135.96];
+    this.scheduleTones(offset, [
+      {
+        delay: 0,
+        startHz: 130.81,
+        endHz: 130.81,
+        duration: 0.9,
+        attack: 0.02,
+        gain: 0.13,
+        type: 'sine',
+        shimmer: 0.1,
+      },
+      ...chord.map((hz, i) => ({
+        delay: 0,
+        startHz: hz,
+        duration: 1.1,
+        attack: 0.01,
+        gain: 0.09,
+        type: 'triangle' as const,
+        filterHz: 3000,
+        endFilterHz: 1600,
+        pan: (i - 1.5) * 0.2,
+        shimmer: 0.48,
+      })),
+      ...bells.map((hz, i) => ({
+        delay: 0.12 + i * 0.07,
+        startHz: hz,
+        duration: 0.6,
+        attack: 0.003,
+        gain: 0.075,
+        type: 'sine' as const,
+        overtoneRatio: 2.75,
+        overtoneGain: 0.12,
+        pan: (i % 2 === 0 ? -1 : 1) * 0.3,
+        shimmer: 0.55,
+      })),
+    ]);
+  }
+
+  /** Gentle descending harp & sparkle while the princess turns back into the snake. */
+  playPrincessReturn(offset = 0): void {
+    this.scheduleNoiseBurst(offset, 0.6, 6000, 1800, 0.035, 'bandpass', 0.05, 1.4, 0.45, 0);
+    const notes = [1567.98, 1318.51, 1174.66, 987.77, 783.99, 659.25, 523.25];
+    this.scheduleTones(offset, [
+      ...notes.map((hz, i) => ({
+        delay: i * 0.07,
+        startHz: hz,
+        duration: i === notes.length - 1 ? 0.5 : 0.26,
+        attack: 0.005,
+        gain: 0.085,
+        type: 'sine' as const,
+        overtoneRatio: 2,
+        overtoneGain: 0.1,
+        pan: 0.3 - i * 0.1,
+        shimmer: 0.44,
+      })),
+    ]);
+  }
+
+  /** Cheerful twinkle when the princess completes a sightseeing lap around a castle. */
+  playPrincessTourLap(offset = 0): void {
+    this.scheduleNoiseBurst(offset, 0.22, 3200, 7000, 0.04, 'highpass', 0.01, 1.2, 0.45, 0);
+    const notes = [783.99, 987.77, 1174.66, 1567.98];
+    this.scheduleTones(offset, [
+      ...notes.map((hz, i) => ({
+        delay: i * 0.06,
+        startHz: hz,
+        duration: i === notes.length - 1 ? 0.45 : 0.22,
+        attack: 0.004,
+        gain: 0.1,
+        type: 'sine' as const,
+        overtoneRatio: 2,
+        overtoneGain: 0.14,
+        pan: (i - 1.5) * 0.2,
+        shimmer: 0.46,
       })),
     ]);
   }
@@ -2349,6 +2495,92 @@ export class Sfx {
     ]);
   }
 
+  /** Enemy bolt: short, low "pew" — clearly darker than the player's bright sprays. */
+  private playBotShoot(spell: BotMagicKind, offset = 0): void {
+    const base = spell === 'frost_orb' ? 880 : spell === 'fire_spread' ? 330 : 520;
+    this.scheduleTones(offset, [
+      {
+        startHz: base,
+        endHz: base * 0.5,
+        duration: 0.11,
+        attack: 0.003,
+        gain: 0.09,
+        type: 'square',
+        filterHz: 1800,
+        endFilterHz: 500,
+      },
+    ]);
+  }
+
+  /** Spell release: rising whoosh + a spell-specific tail (fire crackle / ice chime / arcane wobble). */
+  private playBotSpellCast(spell: BotMagicKind, offset = 0): void {
+    this.scheduleNoiseBurst(offset, 0.2, 500, 2600, 0.05, 'bandpass', 0.04, 1.2, 0.2, 0.1);
+    if (spell === 'frost_orb') {
+      this.scheduleTones(offset, [
+        {
+          startHz: 1568,
+          duration: 0.2,
+          attack: 0.004,
+          gain: 0.07,
+          type: 'sine',
+          overtoneRatio: 2.5,
+          overtoneGain: 0.06,
+        },
+        { delay: 0.07, startHz: 2093, duration: 0.2, attack: 0.004, gain: 0.05, type: 'sine' },
+      ]);
+    } else if (spell === 'fire_spread') {
+      this.scheduleTones(offset, [
+        {
+          startHz: 196,
+          endHz: 392,
+          duration: 0.2,
+          attack: 0.01,
+          gain: 0.1,
+          type: 'sawtooth',
+          filterHz: 900,
+        },
+      ]);
+    } else {
+      this.scheduleTones(offset, [
+        {
+          startHz: 392,
+          endHz: 784,
+          duration: 0.24,
+          attack: 0.01,
+          gain: 0.08,
+          type: 'triangle',
+          shimmer: 0.4,
+        },
+        {
+          delay: 0.1,
+          startHz: 466,
+          endHz: 349,
+          duration: 0.2,
+          attack: 0.01,
+          gain: 0.06,
+          type: 'sine',
+        },
+      ]);
+    }
+  }
+
+  /** Ouch! Thump + descending zap, distinctive but not frightening. */
+  private playPlayerHitByMagic(spell: BotMagicKind, offset = 0): void {
+    this.scheduleNoiseBurst(offset, 0.16, 2400, 400, 0.08, 'lowpass', 0.004, 1.0, 0.1, 0);
+    this.scheduleTones(offset, [
+      { startHz: 150, endHz: 60, duration: 0.2, attack: 0.003, gain: 0.26, type: 'sine' },
+      {
+        startHz: spell === 'frost_orb' ? 1318 : 880,
+        endHz: spell === 'frost_orb' ? 988 : 330,
+        duration: 0.16,
+        attack: 0.003,
+        gain: 0.12,
+        type: 'triangle',
+        filterHz: 2600,
+      },
+    ]);
+  }
+
   private playHazardHit(offset = 0): void {
     this.scheduleTones(offset, [
       {
@@ -3230,13 +3462,7 @@ export class Sfx {
   }
 
   private teardownFxBus(): void {
-    for (const node of this.fxBusNodes) {
-      try {
-        node.disconnect();
-      } catch {
-        // Already disconnected
-      }
-    }
+    disconnectAll(this.fxBusNodes);
     this.fxBusNodes.length = 0;
     this.fxBusInput = null;
     this.fxBusContext = null;
@@ -3412,15 +3638,7 @@ export class Sfx {
       }
     }
 
-    osc.onended = () => {
-      for (const node of cleanupNodes) {
-        try {
-          node.disconnect();
-        } catch {
-          // Already disconnected
-        }
-      }
-    };
+    osc.onended = () => disconnectAll(cleanupNodes);
     osc.start(startTime);
     osc.stop(endTime + 0.02);
 
@@ -3445,14 +3663,7 @@ export class Sfx {
           overGain.connect(sendGain);
         }
       }
-      overOsc.onended = () => {
-        try {
-          overOsc.disconnect();
-          overGain.disconnect();
-        } catch {
-          // Already disconnected
-        }
-      };
+      overOsc.onended = () => disconnectAll([overOsc, overGain]);
       overOsc.start(startTime);
       overOsc.stop(overEnd + 0.02);
     }
@@ -3533,15 +3744,7 @@ export class Sfx {
       }
     }
 
-    src.onended = () => {
-      for (const node of cleanupNodes) {
-        try {
-          node.disconnect();
-        } catch {
-          // Already disconnected
-        }
-      }
-    };
+    src.onended = () => disconnectAll(cleanupNodes);
     src.start(startTime);
     src.stop(endTime + 0.02);
   }

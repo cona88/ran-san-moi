@@ -9,6 +9,7 @@ import type { BrainQuest, GameEvent, GameState } from '../core/types';
  */
 export class VoiceHelper {
   private enabled = true;
+  private lastDodgeHintMs = -Infinity;
 
   /** Feature-check: is speech synthesis available at all? */
   private get supported(): boolean {
@@ -95,6 +96,24 @@ export class VoiceHelper {
       case 'shelter_discovered':
         this.speak('Khám phá lâu đài tuyệt đẹp!');
         break;
+      case 'princess_reveal':
+        this.speak('Biến hình! Tiên nữ xinh đẹp!');
+        break;
+      case 'princess_tour_start': {
+        const shelter = state.shelters?.find((s) => s.id === event.shelterId);
+        const name = shelter ? shelter.nameVi.replace(/^\S+\s/u, '') : 'lâu đài';
+        this.speak(`Tham quan ${name}`);
+        break;
+      }
+      case 'player_hit_by_magic': {
+        // Encouraging, rate-limited so it never nags the player.
+        const nowMs = Date.now();
+        if (nowMs - this.lastDodgeHintMs > 9000) {
+          this.lastDodgeHintMs = nowMs;
+          this.speak(event.spell === 'frost_orb' ? 'Lạnh quá! Cố lên!' : 'Né đạn đi!');
+        }
+        break;
+      }
       default:
         break;
     }

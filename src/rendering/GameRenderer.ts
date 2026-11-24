@@ -7,6 +7,8 @@ import { BotsView } from './bots';
 import { FairyMagicView } from './fairyMagic3d';
 import { FoodView } from './food';
 import { GuardianFairy3DView } from './guardianFairy3d';
+import { HostileMagicView, SPELL_STYLE } from './hostileMagic3d';
+import { PrincessFairy3DView, princessMorphFactor } from './princess3d';
 import { BadgeTextureCache, CrownResources, Labels3DView } from './labels3d';
 import { ObstaclesView } from './obstacles';
 import { THEMES } from './palette';
@@ -50,6 +52,10 @@ export class GameRenderer {
   private readonly shelterView: Shelter3DView;
   private readonly roamingMonstersView: RoamingMonstersView;
   private readonly guardianFairyView: GuardianFairy3DView;
+  private readonly princessView: PrincessFairy3DView;
+  private readonly hostileMagic: HostileMagicView;
+  private readonly princessSparkPos = new Vector3();
+  private princessSparkAcc = 0;
 
   private readonly half: number;
   private renderedMargin = -1;
@@ -95,6 +101,8 @@ export class GameRenderer {
     this.shelterView = new Shelter3DView(this.rig.scene, config.maxGrid);
     this.roamingMonstersView = new RoamingMonstersView(this.rig.scene);
     this.guardianFairyView = new GuardianFairy3DView(this.rig.scene);
+    this.princessView = new PrincessFairy3DView(this.rig.scene);
+    this.hostileMagic = new HostileMagicView(this.rig.scene);
 
     this.setTheme(this.currentTheme);
   }
@@ -136,10 +144,6 @@ export class GameRenderer {
     }
 
     this.syncProjectiles(state);
-    this.fairyMagic.sync(state);
-    this.shelterView.sync(state);
-    this.roamingMonstersView.sync(state);
-    this.guardianFairyView.sync(state);
   }
 
   /** Sync projectiles, bots, hazards, quest orbs & world orbs without disturbing snake interpolation. */
@@ -160,6 +164,7 @@ export class GameRenderer {
     this.shelterView.sync(state);
     this.roamingMonstersView.sync(state);
     this.guardianFairyView.sync(state);
+    this.hostileMagic.sync(state);
   }
 
   /** Trigger magical 3D particle bursts, camera shake & zoom pulses in response to a `GameEvent`. */
@@ -472,6 +477,68 @@ export class GameRenderer {
         this.particles.burstStars(this.eventPos, 0xc792ff, 18, 4.0, 1.0, true);
         this.particles.expandingWave(this.eventPos, 0xffe066, 2.8, 0.45);
         break;
+      case 'princess_transform':
+        this.eventPos.y += 0.6;
+        this.particles.multiRingStarburst(this.eventPos, 0xff7ad9, 0xffe066, 24, 5.2, 1.2);
+        this.particles.expandingWave(this.eventPos, 0xff9de6, 3.6, 0.7, 0.3);
+        this.particles.expandingWave(this.eventPos, 0x7ef8ff, 2.4, 0.55, 0.15);
+        this.rig.triggerZoomPulse(-0.03);
+        break;
+      case 'princess_reveal':
+        this.eventPos.y += 3.2;
+        this.particles.fireworks(this.eventPos);
+        this.particles.flowerBloomBurst(this.eventPos, 0x8ee86a);
+        this.particles.multiRingStarburst(this.eventPos, 0xffe066, 0x8ff5b0, 28, 6.4, 1.4);
+        this.particles.burstStars(this.eventPos, 0xfff5b8, 30, 5.6, 1.3, true);
+        this.eventPos.y = 0.1;
+        this.particles.expandingWave(this.eventPos, 0xff85c0, 5.4, 0.8, 0.4);
+        this.particles.expandingWave(this.eventPos, 0xffe066, 4.0, 0.65, 0.25);
+        this.particles.expandingWave(this.eventPos, 0x7ef8ff, 2.8, 0.5, 0.1);
+        this.rig.triggerShake(0.12, 0.25);
+        this.rig.triggerZoomPulse(0.05);
+        break;
+      case 'princess_return':
+        this.eventPos.y += 2.4;
+        this.particles.burstStars(this.eventPos, 0xc792ff, 22, 4.4, 1.1, true);
+        this.particles.cocoonSparkle(this.eventPos);
+        this.eventPos.y = 0.1;
+        this.particles.expandingWave(this.eventPos, 0xd9b8ff, 3.2, 0.55);
+        break;
+      case 'princess_tour_start':
+        this.eventPos.y += 4;
+        this.particles.multiRingStarburst(this.eventPos, 0xff85c0, 0xffd700, 22, 6.0, 1.3);
+        this.particles.burstStars(this.eventPos, 0xffeb3b, 20, 5.0, 1.2, true);
+        break;
+      case 'bot_shoot': {
+        const hex = SPELL_STYLE[event.spell ?? 'bolt'].glow;
+        this.eventPos.y += 0.9;
+        this.particles.burstStars(this.eventPos, hex, 5, 3.2, 0.6, false);
+        this.particles.expandingWave(this.eventPos, hex, 1.2, 0.22, 0.2);
+        break;
+      }
+      case 'bot_spell_cast': {
+        const style = SPELL_STYLE[event.spell ?? 'arcane_homing'];
+        this.eventPos.y += 1.2;
+        this.particles.burstStars(this.eventPos, style.glow, 10, 4.0, 0.8, false);
+        this.particles.expandingWave(this.eventPos, style.accent, 2.4, 0.38, 0.3);
+        break;
+      }
+      case 'player_hit_by_magic': {
+        const style = SPELL_STYLE[event.spell ?? 'bolt'];
+        this.eventPos.y += 0.9 + aerialLift;
+        this.particles.burstStars(this.eventPos, style.glow, 20, 5.0, 1.0, false);
+        this.particles.burstStars(this.eventPos, 0xff2a2a, 12, 4.2, 0.9, false);
+        this.particles.expandingWave(this.eventPos, 0xff3030, 3.0, 0.45, 0.3);
+        this.rig.triggerShake(0.32, 0.3);
+        this.rig.triggerZoomPulse(0.05);
+        break;
+      }
+      case 'princess_tour_lap':
+        this.eventPos.y += 3;
+        this.particles.fireworks(this.eventPos);
+        this.particles.burstStars(this.eventPos, 0xffe066, 18, 4.6, 1.1, true);
+        this.rig.triggerZoomPulse(-0.02);
+        break;
     }
   }
 
@@ -499,12 +566,31 @@ export class GameRenderer {
     this.board.animate(elapsed);
     this.snakeView.draw(alpha, elapsed, delta, state);
     this.snakeView.getHeadWorldPosition(this.headCamPos);
+    this.princessView.draw(elapsed, delta, state, this.headCamPos, alpha);
+    if (this.princessView.isVisible()) {
+      this.princessView.getPrincessWorldPosition(this.princessSparkPos);
+      this.headCamPos.x = this.princessSparkPos.x;
+      this.headCamPos.z = this.princessSparkPos.z;
+      this.snakeView.syncPrincessNameplate(
+        this.princessSparkPos.x,
+        this.princessView.getHeadTopWorldY(),
+        this.princessSparkPos.z,
+      );
+    }
 
     const camDt = Math.min(Math.max(delta, 0), 0.1);
+    const princessMorph = state.phase === 'playing' ? princessMorphFactor(state, alpha) : 0;
+    const butterflyAlt = state.butterflyAltitude > 0.05 ? state.butterflyAltitude : 0;
     const targetAltitude =
-      state.phase === 'ready' ? 0 : state.butterflyAltitude > 0.05 ? state.butterflyAltitude : 0;
+      state.phase === 'ready' ? 0 : Math.max(butterflyAlt, princessMorph * 3.4);
     const camSmooth = state.phase === 'ready' ? 1 : 1 - Math.exp(-7 * camDt);
     this.aerialCamAltitude += (targetAltitude - this.aerialCamAltitude) * camSmooth;
+
+    // Sightseeing camera: pull back to admire the castle while the princess tours it
+    const touring = state.princessStage === 'princess' && state.princessTourShelterId !== null;
+    this.rig.setExtraZoom(
+      state.phase !== 'playing' ? 0 : touring ? 0.26 : princessMorph > 0 ? 0.14 * princessMorph : 0,
+    );
 
     this.rig.update(
       elapsed,
@@ -515,7 +601,31 @@ export class GameRenderer {
       this.aerialCamAltitude,
     );
 
-    if (state.phase === 'playing') {
+    if (state.phase === 'playing' && princessMorph > 0) {
+      // Princess transformation sparkles & flying stardust trail
+      this.princessSparkAcc += camDt;
+      const interval = state.princessStage === 'princess' ? 0.05 : 0.03;
+      if (this.princessSparkAcc >= interval) {
+        this.princessSparkAcc %= interval;
+        if (state.princessStage === 'princess') {
+          // Golden pixie dust drifting down from the fairy's glow
+          this.princessView.getPrincessWorldPosition(this.princessSparkPos);
+          this.princessSparkPos.y -= 0.9;
+          this.particles.bodyTrailSpark(this.princessSparkPos, 0xffe066, 0.62, false);
+          this.princessSparkPos.y -= 0.5;
+          this.particles.bodyTrailSpark(this.princessSparkPos, 0xfff3b0, 0.48, false);
+        } else {
+          this.princessSparkPos.copy(this.headCamPos);
+          this.princessSparkPos.y = 0.8 + princessMorph * 3.2;
+          this.particles.cocoonSparkle(this.princessSparkPos);
+          this.particles.butterflyWingDust(this.princessSparkPos, elapsed * 4, 1.4);
+        }
+      }
+    } else {
+      this.princessSparkAcc = 0;
+    }
+
+    if (state.phase === 'playing' && princessMorph === 0) {
       const formHex = FORM_METADATA[state.form].hexColor;
       const segCount = this.snakeView.getSegmentCount();
       const speedActive = state.isDashing || state.boosters.speed.activeTicks > 0;
@@ -670,6 +780,7 @@ export class GameRenderer {
     this.shelterView.draw(elapsed, delta, state);
     this.roamingMonstersView.draw(elapsed, delta, state);
     this.guardianFairyView.draw(elapsed, delta, state, this.headCamPos);
+    this.hostileMagic.draw(alpha, projectileAlpha, elapsed, state);
     this.particles.update(delta);
     this.rig.render();
   }
@@ -684,6 +795,16 @@ export class GameRenderer {
       x: (this.projected.x * 0.5 + 0.5) * width,
       y: (-this.projected.y * 0.5 + 0.5) * height,
     };
+  }
+
+  /** Allocation-free world (x, z) -> viewport pixel projection; false when behind the camera. */
+  projectWorld(x: number, z: number, out: { x: number; y: number }): boolean {
+    this.projected.set(x, 0.8, z).project(this.rig.camera);
+    if (this.projected.z > 1) return false;
+    const size = this.rig.getViewportSize();
+    out.x = (this.projected.x * 0.5 + 0.5) * size.width;
+    out.y = (-this.projected.y * 0.5 + 0.5) * size.height;
+    return true;
   }
 
   resize(): void {
@@ -702,6 +823,8 @@ export class GameRenderer {
     this.shelterView.dispose();
     this.roamingMonstersView.dispose();
     this.guardianFairyView.dispose();
+    this.princessView.dispose();
+    this.hostileMagic.dispose();
     this.badgeCache.dispose();
     this.crownResources.dispose();
     this.board.dispose();

@@ -57,6 +57,8 @@ function clamp(v: number, min: number, max: number): number {
 export class SceneRig {
   readonly scene = new Scene();
   readonly camera: PerspectiveCamera;
+  private readonly viewport = { width: 0, height: 0 };
+  private viewportDirty = true;
 
   private readonly renderer: WebGLRenderer;
   private readonly composer: EffectComposer;
@@ -96,6 +98,8 @@ export class SceneRig {
   private currentZoom = 1;
   private zoomPulse = 0;
   private aerialAltitude = 0;
+  private extraZoomTarget = 0;
+  private extraZoom = 0;
 
   private targetLookX = 0;
   private targetLookZ = 0;
@@ -255,6 +259,11 @@ export class SceneRig {
     this.zoomPulse = clamp(this.zoomPulse + amount, -0.16, 0.2);
   }
 
+  /** Smoothly pull the camera back (e.g. `0.4` = 40% farther) for sightseeing tours. */
+  setExtraZoom(amount: number): void {
+    this.extraZoomTarget = Number.isFinite(amount) ? clamp(amount, 0, 1) : 0;
+  }
+
   /** Set normalized camera look offset (-1..1) from DualSense Right Stick. */
   setCameraLook(nx: number, ny: number): void {
     const safeX = Number.isFinite(nx) ? clamp(nx, -1, 1) : 0;
@@ -309,6 +318,7 @@ export class SceneRig {
     this.targetZoom = this.computeZoomScale(playerLevel);
     const zoomSmooth = 1 - Math.exp(-5 * dt);
     this.currentZoom += (this.targetZoom - this.currentZoom) * zoomSmooth;
+    this.extraZoom += (this.extraZoomTarget - this.extraZoom) * (1 - Math.exp(-2.2 * dt));
 
     if (this.zoomPulse !== 0) {
       this.zoomPulse *= Math.exp(-9 * dt);
@@ -360,9 +370,14 @@ export class SceneRig {
 
   /** Effective viewport dimensions for 2D UI projection. */
   getViewportSize(): { width: number; height: number } {
-    const width = this.container.clientWidth || window.innerWidth;
-    const height = this.container.clientHeight || window.innerHeight;
-    return { width, height };
+    // Cached: reading clientWidth/clientHeight every call forces a synchronous layout
+    // whenever the DOM HUD is dirty (this runs per frame for survival arrows).
+    if (this.viewportDirty) {
+      this.viewport.width = this.container.clientWidth || window.innerWidth;
+      this.viewport.height = this.container.clientHeight || window.innerHeight;
+      this.viewportDirty = false;
+    }
+    return this.viewport;
   }
 
   /** Current world-space focus point `(followX, followZ)`. */
@@ -377,6 +392,7 @@ export class SceneRig {
 
   /** Match renderer, composer and camera to the current window size. */
   resize(): void {
+    this.viewportDirty = true;
     const w = this.container.clientWidth;
     const h = this.container.clientHeight;
     if (w <= 0 || h <= 0) return;
@@ -488,7 +504,7 @@ export class SceneRig {
   }
 
   private applyCameraTransform(): void {
-    const effectiveZoom = Math.max(0.78, this.currentZoom + this.zoomPulse);
+    const effectiveZoom = Math.max(0.78, this.currentZoom * (1 + this.extraZoom) + this.zoomPulse);
     const dist = this.fittedDistance * effectiveZoom;
     const scale = dist / this.baseDistance;
     this.fog.near = FOG_NEAR * scale;

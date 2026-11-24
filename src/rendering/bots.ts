@@ -23,6 +23,8 @@ import { cellToWorld } from './world';
 
 const TELEPORT_THRESHOLD_SQ = 4.0 * 4.0;
 const LABEL_VISIBLE_DIST_SQ = 32 * 32;
+/** Bots farther than this from the player focus are hidden and not animated. */
+const BOT_CULL_DIST_SQ = 80 * 80;
 
 function computeBotThicknessScale(level: number, isBoss: boolean): number {
   const base = clamp(0.85 + Math.log2(Math.max(1, level) + 4) * 0.14, 0.95, 1.85);
@@ -334,6 +336,23 @@ export class BotsView {
 
     for (const vis of this.visuals.values()) {
       const bot = vis.bot;
+
+      // Distance cull: the open world is 560x560 with 60+ bots, nearly all far off-screen.
+      // Skip interpolation of their dozens of segment meshes and hide them from the scene graph.
+      const cdx = (vis.headFrom.x + vis.headTo.x) * 0.5 - this.playerFocus.x;
+      const cdz = (vis.headFrom.z + vis.headTo.z) * 0.5 - this.playerFocus.z;
+      const culled = cdx * cdx + cdz * cdz > BOT_CULL_DIST_SQ;
+      // Detached subtrees are skipped by Three's per-frame updateMatrixWorld + culling traversal.
+      if (culled) {
+        if (vis.root.parent) this.root.remove(vis.root);
+      } else if (!vis.root.parent) {
+        this.root.add(vis.root);
+      }
+      if (culled) {
+        vis.currentThickness = computeBotThicknessScale(bot.level, bot.isBoss);
+        continue;
+      }
+
       const isChomped = (bot.chompedTicks ?? 0) > 0 && !gameover;
       const targetThickness = computeBotThicknessScale(bot.level, bot.isBoss);
       vis.currentThickness += (targetThickness - vis.currentThickness) * Math.min(1, dt * 8);

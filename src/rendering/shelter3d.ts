@@ -142,6 +142,9 @@ interface ShelterSparkleMote {
   readonly baseScale: number;
 }
 
+const SHELTER_CULL_DISTANCE = 70;
+const NO_MOTES: readonly ShelterSparkleMote[] = [];
+
 interface ShelterVisualEntry {
   readonly shelter: ShelterHouse;
   readonly group: Group;
@@ -2443,6 +2446,11 @@ export class Shelter3DView {
   private rebuildShelters(shelters: readonly ShelterHouse[]): void {
     // Clear old visuals
     for (const v of this.shelterVisuals) {
+      // Re-attach culled subtrees so disposeGroup reaches their geometry/materials.
+      if (!v.houseGroup.parent) {
+        v.group.add(v.houseGroup);
+        v.group.add(v.domeGroup);
+      }
       this.root.remove(v.group);
       disposeGroup(v.group);
     }
@@ -2484,6 +2492,7 @@ export class Shelter3DView {
     };
     const playerInShelter = state.inShelter ?? false;
     const currentShelterId = state.currentShelterId ?? null;
+    const playerHead = state.snake[0];
 
     // 1. Animate Sanctuary Houses & Protective Domes
     for (const entry of this.shelterVisuals) {
@@ -2491,8 +2500,9 @@ export class Shelter3DView {
       const isWarning = monsterEvent.phase === 'warning';
       const isStrike = monsterEvent.phase === 'strike';
 
-      // Smooth interpolation for inside aura
-      const targetInside = isPlayerInside ? 1.0 : 0.0;
+      // Smooth interpolation for inside aura (kept faint while the Fairy Princess sightsees so the castle stays crisp)
+      const princessSightseeing = (state.princessStage ?? 'snake') !== 'snake';
+      const targetInside = isPlayerInside ? (princessSightseeing ? 0.12 : 1.0) : 0.0;
       entry.insideLevel += (targetInside - entry.insideLevel) * (1 - Math.exp(-6 * dt));
 
       // Warning urgency level
@@ -2503,8 +2513,30 @@ export class Shelter3DView {
       const targetStrike = isStrike ? 1.0 : 0.0;
       entry.strikeLevel += (targetStrike - entry.strikeLevel) * (1 - Math.exp(-12 * dt));
 
+      // Distance culling: far castles are off-screen, so hide the heavy meshes and skip their
+      // decorative animation (name lookups + dozens of transforms per frame). Beacon beam,
+      // ground ring and pillar stay live so distant castles remain discoverable.
+      const near =
+        !playerHead ||
+        isPlayerInside ||
+        entry.insideLevel > 0.01 ||
+        state.princessTourShelterId === entry.shelter.id ||
+        Math.hypot(playerHead.x - entry.shelter.x, playerHead.z - entry.shelter.z) <
+          entry.shelter.radius + SHELTER_CULL_DISTANCE;
+      if (near) {
+        if (!entry.houseGroup.parent) {
+          entry.group.add(entry.houseGroup);
+          entry.group.add(entry.domeGroup);
+        }
+      } else if (entry.houseGroup.parent) {
+        entry.group.remove(entry.houseGroup);
+        entry.group.remove(entry.domeGroup);
+      }
+
       // Gentle decorative animations
-      if (entry.shelter.kind === 'castle') {
+      if (!near) {
+        // skipped while far away
+      } else if (entry.shelter.kind === 'castle') {
         const star = entry.houseGroup.getObjectByName('starFinial');
         if (star) {
           star.rotation.y = elapsed * 1.5;
@@ -2710,7 +2742,7 @@ export class Shelter3DView {
       }
 
       // Floating fairy sparkle motes inside sanctuary
-      for (const mote of entry.sparkMotes) {
+      for (const mote of near ? entry.sparkMotes : NO_MOTES) {
         const a = mote.baseAngle + elapsed * mote.speed;
         const mx = Math.cos(a) * mote.radius;
         const mz = Math.sin(a) * mote.radius;
@@ -2976,6 +3008,10 @@ export class Shelter3DView {
   dispose(): void {
     this.scene.remove(this.root);
     for (const v of this.shelterVisuals) {
+      if (!v.houseGroup.parent) {
+        v.group.add(v.houseGroup);
+        v.group.add(v.domeGroup);
+      }
       disposeGroup(v.group);
     }
     this.shelterVisuals.length = 0;

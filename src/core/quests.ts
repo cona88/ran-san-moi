@@ -27,6 +27,8 @@ import {
   spawnArcaneNova,
 } from './fairyMagic';
 
+import type { BotMagicKind } from './types';
+
 export interface EventDraft {
   readonly kind: GameEventKind;
   readonly cell?: Cell;
@@ -35,6 +37,7 @@ export interface EventDraft {
   readonly chompStreak?: number;
   readonly messageVi?: string;
   readonly shelterId?: string;
+  readonly spell?: BotMagicKind;
 }
 
 const BOOSTER_ORDER: readonly BoosterKind[] = ['level', 'speed', 'magnet'];

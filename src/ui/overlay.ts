@@ -25,6 +25,7 @@ const CONTROL_ICONS: readonly ControlIconItem[] = [
   { icon: '□', action: 'Hoa🌸' },
   { icon: 'R1', action: 'Bay/Đáp🦋' },
   { icon: 'L1', action: 'Sét⚡' },
+  { icon: 'L1+R1', action: 'Tiên Nữ👸' },
   { icon: 'L2+Nút / Pad', action: 'AoE🔥🌊🔮' },
 ];
 
@@ -50,6 +51,7 @@ export class GameOverlay {
   private readonly huntTipEl: HTMLElement;
 
   private readonly ageCardsRow: HTMLElement;
+  private readonly survivalHintEl: HTMLElement;
   private readonly nicknameRow: HTMLElement;
   private readonly playerNameInput: HTMLInputElement;
   private readonly setupSection: HTMLElement;
@@ -306,6 +308,11 @@ export class GameOverlay {
       this.callbacks.onRestartGame();
     });
 
+    this.survivalHintEl = el('div', {
+      className: 'survival-hint',
+      text: '⚔️ Bot biết bắn phép • 10 tim • Sống sót là thử thách!',
+    });
+
     this.ctaHintEl = el('div', {
       className: 'overlay-cta-hint',
       text: 'Bấm nút ✕ trên DualSense hoặc Enter để bắt đầu',
@@ -329,6 +336,7 @@ export class GameOverlay {
       this.statsGrid,
       this.scoreSublineEl,
       this.ageCardsRow,
+      this.survivalHintEl,
       this.controllerLine,
       this.huntTipEl,
       this.setupSection,

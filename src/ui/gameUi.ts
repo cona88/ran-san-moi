@@ -24,11 +24,13 @@ import { LeaderboardPanel } from './leaderboard';
 import { MagicBar } from './magicBar';
 import { GameOverlay } from './overlay';
 import { ScorePopups } from './popups';
+import { PrincessButton } from './princessButton';
 import { QuestBanner } from './questBanner';
+import { SurvivalFx, type WorldProjector } from './survivalFx';
 import { themeLabelVi, type GameUICallbacks, type InitialUISettings } from './types';
 
 export type ControlFeedbackKind =
-  'steer' | 'shoot' | 'morph' | 'dash' | 'shield' | 'booster' | 'skill';
+  'steer' | 'shoot' | 'morph' | 'dash' | 'shield' | 'booster' | 'skill' | 'princess';
 
 const BOOSTER_PILL_MAP: Readonly<Record<BoosterKind, string>> = {
   level: 'L3',
@@ -88,6 +90,8 @@ export class GameUI {
   private readonly popups: ScorePopups;
   private readonly toasts: AchievementToast;
   private readonly fairySkills: FairySkillButtons;
+  private readonly princessButton: PrincessButton;
+  private readonly survivalFx: SurvivalFx;
 
   private lastPhase: GamePhase | '' = '';
   private bestAtRunStart = 0;
@@ -149,6 +153,8 @@ export class GameUI {
     this.popups = new ScorePopups(uiRoot);
     this.toasts = new AchievementToast(uiRoot);
     this.fairySkills = new FairySkillButtons(this.shellEl, callbacks);
+    this.princessButton = new PrincessButton(this.shellEl, callbacks);
+    this.survivalFx = new SurvivalFx(this.shellEl);
   }
 
   getSelectedMode(): GameMode {
@@ -181,6 +187,8 @@ export class GameUI {
     this.crownArrow.syncState(state);
     this.magicBar.syncState(state);
     this.fairySkills.syncState(state);
+    this.princessButton.syncState(state);
+    this.survivalFx.syncState(state);
 
     const isFlying = state.butterflyStage === 'butterfly' && state.phase === 'playing';
     const isSpraying = state.sprayActiveTicks > 0 && state.phase === 'playing';
@@ -254,7 +262,13 @@ export class GameUI {
     }
   }
 
+  /** Per-frame: edge arrows toward off-screen incoming fire (Thử Thách Sinh Tồn only). */
+  updateSurvivalThreats(state: GameState, project: WorldProjector): void {
+    this.survivalFx.updateThreats(state, project);
+  }
+
   onEvent(event: GameEvent, state: GameState, screenPos: { x: number; y: number } | null): void {
+    this.survivalFx.onEvent(event);
     switch (event.kind) {
       case 'eat_food': {
         if (screenPos) {
@@ -472,7 +486,14 @@ export class GameUI {
         if (screenPos) {
           this.popups.spawnCelebration(screenPos.x, screenPos.y, '❤️ +1 Tim!', '#ff5ec4');
         }
-        this.showToast('Tim Phép Thuật!', event.messageVi ?? 'Thưởng +1 Tim phép thuật! 💖', '💖');
+        // Repeated shelter regen heals are quiet (popup only) so toasts never spam.
+        if (event.messageVi || !state.currentShelterId) {
+          this.showToast(
+            'Tim Phép Thuật!',
+            event.messageVi ?? 'Thưởng +1 Tim phép thuật! 💖',
+            '💖',
+          );
+        }
         break;
       }
 
@@ -619,6 +640,59 @@ export class GameUI {
         }
         break;
       }
+
+      case 'princess_transform': {
+        if (screenPos) {
+          this.popups.spawnCelebration(screenPos.x, screenPos.y, '🌟 Biến Hình!', '#ff9de6');
+        }
+        break;
+      }
+
+      case 'princess_reveal': {
+        if (screenPos) {
+          this.popups.spawnCelebration(screenPos.x, screenPos.y, '👸 Tiên Nữ Xinh Đẹp!', '#ffd447');
+        }
+        this.showToast(
+          '👸 Tiên Nữ Xinh Đẹp!',
+          'Bay tới gần lâu đài, thả tay lái để Tiên Nữ tự bay vòng tham quan ✨',
+          '👸',
+        );
+        break;
+      }
+
+      case 'princess_return': {
+        if (screenPos) {
+          this.popups.spawn(screenPos.x, screenPos.y, '🐍 Trở về Rắn Tiên', '#d9b8ff');
+        }
+        if (event.messageVi?.startsWith('⚠️')) {
+          this.showToast('Tiên Nữ hạ cánh!', event.messageVi, '⚠️');
+        }
+        break;
+      }
+
+      case 'princess_tour_start': {
+        const shelter = state.shelters.find((s) => s.id === event.shelterId);
+        this.showToast(
+          '🏰 Tham Quan Lâu Đài!',
+          shelter
+            ? `Tiên Nữ đang bay vòng quanh ${shelter.nameVi} ✨`
+            : 'Tiên Nữ đang tham quan ✨',
+          '👸',
+        );
+        break;
+      }
+
+      case 'princess_tour_lap': {
+        if (screenPos) {
+          this.popups.spawnCelebration(
+            screenPos.x,
+            screenPos.y,
+            `🎀 Vòng Tham Quan +${event.points ?? 100}!`,
+            '#ffd447',
+          );
+        }
+        break;
+      }
     }
   }
 
@@ -663,6 +737,11 @@ export class GameUI {
         }
         break;
       }
+      case 'princess':
+        this.flashSelector('#princess-btn', 'just-pressed', 380);
+        this.hud.flashControllerPill('L1');
+        this.hud.flashControllerPill('R1');
+        break;
     }
   }
 
@@ -687,6 +766,8 @@ export class GameUI {
     this.popups.dispose();
     this.toasts.dispose();
     this.fairySkills.dispose();
+    this.princessButton.dispose();
+    this.survivalFx.dispose();
     this.topStackEl.remove();
     this.shellEl.remove();
   }

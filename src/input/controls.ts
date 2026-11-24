@@ -28,6 +28,8 @@ export interface ControlHandlers {
   castFairySkill(skill: FairySkillKind): void;
   /** Activate or release press-and-hold Pink Frost Butterfly transformation. */
   setButterflyHold(active: boolean): void;
+  /** Transform into the flying Fairy Princess (or return to snake form). */
+  togglePrincess(): void;
   /** Smooth 3D camera look offset (-1..1 on X/Y from Right Stick). */
   cameraLook(nx: number, ny: number): void;
 }

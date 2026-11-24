@@ -180,6 +180,12 @@ export function attachKeyboard(handlers: ControlHandlers): () => void {
       return;
     }
 
+    if (code === 'KeyT') {
+      event.preventDefault();
+      if (!event.repeat) handlers.togglePrincess();
+      return;
+    }
+
     const booster = KEY_TO_BOOSTER[code];
     if (booster) {
       event.preventDefault();

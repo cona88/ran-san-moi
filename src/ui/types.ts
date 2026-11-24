@@ -30,6 +30,7 @@ export interface GameUICallbacks {
   onCastFairySkill(skill: FairySkillKind): void;
   onButterflyHold?(active: boolean): void;
   onSpeakQuest?(): void;
+  onTogglePrincess?(): void;
 }
 
 /** Initial user preferences passed into {@link GameUI}. */

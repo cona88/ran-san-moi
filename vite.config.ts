@@ -9,6 +9,13 @@ export default defineConfig({
     sourcemap: true,
     // Three.js alone is ~500 kB; that is the floor for a WebGL game, not bloat.
     chunkSizeWarningLimit: 700,
+    rollupOptions: {
+      output: {
+        // Keep Three.js in its own long-cached vendor chunk so game-code edits
+        // don't invalidate it and neither chunk trips the size warning.
+        manualChunks: { three: ['three'] },
+      },
+    },
   },
   test: {
     environment: 'node',

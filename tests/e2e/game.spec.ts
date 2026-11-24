@@ -2828,3 +2828,275 @@ test('Guardian Fairy visitor banner, princess preset chips, and zero HUD overlap
   expect(externalRequests).toEqual([]);
   expect(errors, errors.join('\n')).toEqual([]);
 });
+
+test('👸 Fairy Princess transformation via button, KeyT & DualSense L1+R1/Touchpad, tour banner, and zero HUD overlap at 1280x800', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const buttons = Array.from({ length: 18 }, () => ({
+      pressed: false,
+      touched: false,
+      value: 0,
+    }));
+    const mockPad = {
+      id: 'DualSense Wireless Controller (STANDARD GAMEPAD Vendor: 054c Product: 0ce6)',
+      index: 0,
+      connected: true,
+      mapping: 'standard',
+      axes: [0, 0, 0, 0],
+      buttons,
+      timestamp: performance.now(),
+    };
+    (
+      window as unknown as {
+        __dsSetButton: (idx: number, pressed: boolean, value?: number) => void;
+      }
+    ).__dsSetButton = (idx, pressed, value = pressed ? 1 : 0) => {
+      const btn = buttons[idx];
+      if (btn) {
+        btn.pressed = pressed;
+        btn.touched = pressed;
+        btn.value = value;
+      }
+      mockPad.timestamp = performance.now();
+    };
+    Object.defineProperty(navigator, 'getGamepads', {
+      configurable: true,
+      value: () => [mockPad, null, null, null],
+    });
+  });
+
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const { errors, apiRequests, externalRequests } = attachErrorWatchers(page);
+
+  await page.goto('/');
+  await page.getByRole('button', { name: /Thư Giãn Xuyên Tường/ }).click();
+  await page.getByRole('button', { name: /Dễ \(Làm quen\)/ }).click();
+  await cta(page).click();
+  await expect(overlay(page)).toHaveClass(/hidden/);
+
+  const princessBtn = page.locator('#princess-btn');
+  const banner = page.locator('#princess-tour-banner');
+  const readStage = () =>
+    page.evaluate(() => {
+      type Bridge = { getState: () => { princessStage: string; princessCooldownTicks: number } };
+      return (window as unknown as { __snakeGame?: Bridge }).__snakeGame?.getState().princessStage;
+    });
+
+  await expect(princessBtn).toBeVisible();
+  await expect(princessBtn).toContainText('TIÊN NỮ');
+  await expect(princessBtn).toContainText('L1+R1');
+  await expect(page.locator('#fairy-skills .fairy-skill-btn')).toHaveCount(6);
+
+  // 1) Transform via the on-screen button
+  await princessBtn.click();
+  await expect.poll(readStage, { timeout: 1500 }).toBe('transforming');
+  await expect.poll(readStage, { timeout: 4000 }).toBe('princess');
+  await expect(princessBtn).toHaveClass(/is-active/);
+  await expect(princessBtn).toContainText('TRỞ VỀ');
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText('Tiên Nữ');
+
+  const layout = await page.evaluate(() => {
+    type Box = { name: string; left: number; top: number; right: number; bottom: number };
+    const readBox = (selector: string): Box | null => {
+      const el = document.querySelector<HTMLElement>(selector);
+      if (!el || el.classList.contains('hidden')) return null;
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) return null;
+      return { name: selector, left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+    };
+    const overlap = (a: Box, b: Box): boolean =>
+      Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 &&
+      Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1;
+
+    const boxes = [
+      '#hud-top .hud-left-col',
+      '#hud-top .hud-right-col',
+      '#shelter-alerts-container',
+      '#top-hud-stack',
+      '#booster-buttons',
+      '#crown-radar',
+      '#shelter-radar',
+      '#magic-bar',
+      '#fairy-skills',
+      '#princess-btn',
+    ]
+      .map(readBox)
+      .filter((b): b is Box => b !== null);
+
+    const overlaps: string[] = [];
+    for (let i = 0; i < boxes.length; i += 1) {
+      for (let j = i + 1; j < boxes.length; j += 1) {
+        const a = boxes[i]!;
+        const b = boxes[j]!;
+        if (overlap(a, b)) overlaps.push(`${a.name} <-> ${b.name}`);
+      }
+    }
+    const outOfBounds = boxes
+      .filter((b) => b.left < 0 || b.top < 0 || b.right > 1280.5 || b.bottom > 800.5)
+      .map((b) => b.name);
+    const dock = document.querySelector<HTMLElement>('#fairy-skills')?.getBoundingClientRect();
+    return { overlaps, outOfBounds, dockHeight: dock?.height ?? 999 };
+  });
+  expect(layout.overlaps).toEqual([]);
+  expect(layout.outOfBounds).toEqual([]);
+  expect(layout.dockHeight).toBeLessThanOrEqual(180);
+
+  // 2) Return to snake via keyboard T
+  await page.keyboard.press('KeyT');
+  await expect.poll(readStage, { timeout: 1500 }).toBe('returning');
+  await expect.poll(readStage, { timeout: 4000 }).toBe('snake');
+  await expect(princessBtn).not.toHaveClass(/is-active/);
+  await expect(banner).toBeHidden();
+
+  // Wait for princess cooldown (60 ticks ≈ 3s) to finish, then test DualSense L1+R1 & Touchpad return
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          type Bridge = { getState: () => { princessCooldownTicks: number } };
+          return (window as unknown as { __snakeGame?: Bridge }).__snakeGame?.getState()
+            .princessCooldownTicks;
+        }),
+      { timeout: 4500 },
+    )
+    .toBe(0);
+
+  // 3) DualSense L1 (4) + R1 (5) chord -> transforms into Fairy Princess without triggering Butterfly
+  await page.evaluate(() => {
+    const setBtn = (window as unknown as { __dsSetButton: (i: number, p: boolean) => void })
+      .__dsSetButton;
+    setBtn(5, true);
+    setBtn(4, true);
+  });
+  await expect.poll(readStage, { timeout: 1500 }).toBe('transforming');
+  await page.evaluate(() => {
+    const setBtn = (window as unknown as { __dsSetButton: (i: number, p: boolean) => void })
+      .__dsSetButton;
+    setBtn(4, false);
+    setBtn(5, false);
+  });
+  await expect.poll(readStage, { timeout: 4000 }).toBe('princess');
+
+  // 4) Single Touchpad tap (17) while flying as Fairy Princess -> returns cleanly to snake
+  await page.evaluate(() => {
+    (window as unknown as { __dsSetButton: (i: number, p: boolean) => void }).__dsSetButton(
+      17,
+      true,
+    );
+  });
+  await expect.poll(readStage, { timeout: 1500 }).toBe('returning');
+  await page.evaluate(() => {
+    (window as unknown as { __dsSetButton: (i: number, p: boolean) => void }).__dsSetButton(
+      17,
+      false,
+    );
+  });
+  await expect.poll(readStage, { timeout: 4000 }).toBe('snake');
+
+  expect(apiRequests).toEqual([]);
+  expect(externalRequests).toEqual([]);
+  expect(errors, errors.join('\n')).toEqual([]);
+});
+
+test('🛡️ Thử Thách Sinh Tồn (age9 + Khó): 10 hearts, badge, hostile magic projectiles, zero HUD overlap; age6 + Khó keeps old hearts', async ({
+  page,
+}) => {
+  const { errors, apiRequests, externalRequests } = attachErrorWatchers(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/');
+
+  const age6Card = page.locator('button.age-profile-card[data-age-profile="age6"]');
+  const age9Card = page.locator('button.age-profile-card[data-age-profile="age9"]');
+  const hardBtn = page.getByRole('button', { name: /Siêu Anh Hùng Nhí/ });
+  const badge = page.locator('#hud-top .hud-survival-badge');
+
+  // --- age6 + Khó: unchanged classic hearts, no survival badge ---
+  await age6Card.click();
+  await hardBtn.click();
+  await expect(overlay(page)).toHaveAttribute('data-difficulty', 'hard');
+  await page.keyboard.press('Enter');
+  await expect(overlay(page)).toHaveClass(/hidden/);
+  const age6Hearts = await page.locator('#hud-top .hud-heart.filled').count();
+  expect(age6Hearts).toBeLessThan(10);
+  expect(age6Hearts).toBeGreaterThanOrEqual(1);
+  await expect(badge).toBeHidden();
+  const age6Proj = await page.evaluate(() => {
+    type Bridge = { getState: () => { hostileProjectiles: unknown[]; hearts: number } };
+    const s = (window as unknown as { __snakeGame?: Bridge }).__snakeGame?.getState();
+    return { n: s?.hostileProjectiles.length ?? -1, hearts: s?.hearts ?? -1 };
+  });
+  expect(age6Proj.n).toBe(0);
+  expect(age6Proj.hearts).toBe(age6Hearts);
+
+  // --- age9 + Khó: survival challenge ---
+  await page.reload();
+  await age9Card.click();
+  await hardBtn.click();
+  await expect(overlay(page)).toHaveAttribute('data-age-profile', 'age9');
+  await expect(overlay(page)).toHaveAttribute('data-difficulty', 'hard');
+  await page.keyboard.press('Enter');
+  await expect(overlay(page)).toHaveClass(/hidden/);
+
+  await expect(badge).toBeVisible();
+  await expect(badge).toContainText('Thử Thách Sinh Tồn');
+  await expect(page.locator('#hud-top .hud-heart')).toHaveCount(10);
+  await expect(page.locator('#hud-top .hud-heart.filled')).toHaveCount(10);
+
+  // Wait for bots to start shooting/casting at the player.
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(() => {
+          type Bridge = { getState: () => { hostileProjectiles: unknown[] } };
+          return (
+            (window as unknown as { __snakeGame?: Bridge }).__snakeGame?.getState()
+              .hostileProjectiles.length ?? 0
+          );
+        }),
+      { timeout: 45_000, intervals: [100] },
+    )
+    .toBeGreaterThan(0);
+
+  const layout = await page.evaluate(() => {
+    type Box = { name: string; left: number; top: number; right: number; bottom: number };
+    const readBox = (selector: string): Box | null => {
+      const el = document.querySelector<HTMLElement>(selector);
+      if (!el || el.classList.contains('hidden')) return null;
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) return null;
+      return { name: selector, left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+    };
+    const overlap = (a: Box, b: Box): boolean =>
+      Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 &&
+      Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1;
+    const boxes = [
+      '#hud-top .hud-left-col',
+      '#hud-top .hud-right-col',
+      '#top-hud-stack',
+      '#booster-buttons',
+      '#crown-radar',
+      '#magic-bar',
+      '#fairy-skills',
+    ]
+      .map(readBox)
+      .filter((b): b is Box => b !== null);
+    const overlaps: string[] = [];
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        if (overlap(boxes[i]!, boxes[j]!)) overlaps.push(`${boxes[i]!.name} <-> ${boxes[j]!.name}`);
+      }
+    }
+    const outOfBounds = boxes
+      .filter((b) => b.left < 0 || b.top < 0 || b.right > 1280.5 || b.bottom > 800.5)
+      .map((b) => b.name);
+    return { overlaps, outOfBounds };
+  });
+  expect(layout.overlaps).toEqual([]);
+  expect(layout.outOfBounds).toEqual([]);
+
+  expect(apiRequests).toEqual([]);
+  expect(externalRequests).toEqual([]);
+  expect(errors, errors.join('\n')).toEqual([]);
+});

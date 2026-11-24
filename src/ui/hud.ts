@@ -1,3 +1,4 @@
+import { isSurvivalChallenge } from '../core/botMagic';
 import { DEFAULT_SESSION_DURATION_MS, FORM_METADATA } from '../core/config';
 import type {
   AgeProfile,
@@ -115,6 +116,7 @@ export class HudBar {
   private readonly timerPill: HTMLElement;
   private readonly botsEatenPill: HTMLElement;
   private readonly heartsRow: HTMLElement;
+  private readonly survivalBadge: HTMLElement;
   private readonly shieldPill: HTMLElement;
   private readonly levelPill: HTMLElement;
   private readonly scoreValue: HTMLElement;
@@ -167,6 +169,9 @@ export class HudBar {
   private readonly alertsContainer: HTMLElement;
   private readonly fairyVisitorEl: HTMLElement;
   private readonly fairyVisitorText: HTMLElement;
+  private readonly princessTourEl: HTMLElement;
+  private readonly princessTourText: HTMLElement;
+  private lastPrincessBannerKey = '';
   private readonly castleDiscoveryToastEl: HTMLElement;
   private readonly castleDiscoveryToastText: HTMLElement;
   private readonly monsterAlertEl: HTMLElement;
@@ -254,7 +259,19 @@ export class HudBar {
       this.makeMiniMetric('🏆', this.bestValue, 'Kỷ lục'),
       this.comboPill,
     );
-    const vitalsStack = el('div', { className: 'hud-vitals-stack' }, vitalsRow, miniMetricsRow);
+    this.survivalBadge = el('div', {
+      id: 'survival-badge',
+      className: 'hud-survival-badge hidden',
+      text: '🛡️ Thử Thách Sinh Tồn',
+      title: 'Bot biết bắn phép! Né đạn để sống sót nhé!',
+    });
+    const vitalsStack = el(
+      'div',
+      { className: 'hud-vitals-stack' },
+      vitalsRow,
+      miniMetricsRow,
+      this.survivalBadge,
+    );
 
     const statsCard = el(
       'div',
@@ -403,6 +420,18 @@ export class HudBar {
     );
     this.fairyVisitorEl.setAttribute('role', 'status');
 
+    this.princessTourText = el('span', { className: 'princess-tour-text', text: '' });
+    this.princessTourEl = el(
+      'div',
+      {
+        id: 'princess-tour-banner',
+        className: 'princess-tour-banner hidden',
+        ariaLabel: 'Tiên Nữ tham quan lâu đài',
+      },
+      this.princessTourText,
+    );
+    this.princessTourEl.setAttribute('role', 'status');
+
     this.castleDiscoveryToastText = el('span', {
       className: 'castle-discovery-toast-text',
       text: '',
@@ -449,6 +478,7 @@ export class HudBar {
       'div',
       { id: 'shelter-alerts-container', className: 'shelter-alerts-container' },
       this.fairyVisitorEl,
+      this.princessTourEl,
       this.castleDiscoveryToastEl,
       this.monsterAlertEl,
       this.safeShelterEl,
@@ -535,6 +565,8 @@ export class HudBar {
         this.flashClass(this.botsEatenPill, 'hud-pop', 380);
       }
     }
+
+    this.survivalBadge.classList.toggle('hidden', !isSurvivalChallenge(state));
 
     const heartsKey = `${state.hearts}/${state.maxHearts}/${state.invulnerableTicks > 0 ? 1 : 0}`;
     if (heartsKey !== this.lastHeartsKey) {
@@ -757,6 +789,10 @@ export class HudBar {
         this.lastFairyBannerKey = 'hidden';
         this.fairyVisitorEl.classList.add('hidden');
       }
+      if (this.lastPrincessBannerKey !== 'hidden') {
+        this.lastPrincessBannerKey = 'hidden';
+        this.princessTourEl.classList.add('hidden');
+      }
       if (this.lastMonsterAlertKey !== 'hidden') {
         this.lastMonsterAlertKey = 'hidden';
         this.monsterAlertEl.classList.add('hidden');
@@ -802,6 +838,34 @@ export class HudBar {
         this.fairyVisitorEl.classList.remove('hidden');
       } else {
         this.fairyVisitorEl.classList.add('hidden');
+      }
+    }
+
+    // 0c. Fairy Princess flight / castle tour banner
+    const princessStage = state.princessStage ?? 'snake';
+    let princessKey = 'hidden';
+    let princessText = '';
+    if (princessStage === 'princess') {
+      const touring = (state.shelters ?? []).find((s) => s.id === state.princessTourShelterId);
+      if (touring) {
+        const info = shelterRadarInfo(touring.kind);
+        princessKey = `tour|${touring.id}|${state.princessTourLaps}`;
+        princessText = `👸 Tiên Nữ tham quan ${info.icon} ${info.shortName} • Vòng ${state.princessTourLaps + 1} ✨`;
+      } else {
+        princessKey = 'fly';
+        princessText = '👸 Tiên Nữ đang bay • Bay gần lâu đài để tham quan ✨';
+      }
+    } else if (princessStage === 'transforming') {
+      princessKey = 'transforming';
+      princessText = '🌟 Phép màu biến hình đang diễn ra... ✨';
+    }
+    if (princessKey !== this.lastPrincessBannerKey) {
+      this.lastPrincessBannerKey = princessKey;
+      if (princessKey === 'hidden') {
+        this.princessTourEl.classList.add('hidden');
+      } else {
+        this.princessTourText.textContent = princessText;
+        this.princessTourEl.classList.remove('hidden');
       }
     }
 
@@ -860,11 +924,12 @@ export class HudBar {
 
     // 2. Safe Shelter Indicator
     const currentId = state.currentShelterId ?? '';
-    const safeKey = `${inShelter ? 1 : 0}|${currentId}`;
+    const princessFlying = princessStage !== 'snake';
+    const safeKey = `${inShelter ? 1 : 0}|${currentId}|${princessFlying ? 1 : 0}`;
 
     if (safeKey !== this.lastSafeShelterKey) {
       this.lastSafeShelterKey = safeKey;
-      if (inShelter) {
+      if (inShelter && !princessFlying) {
         const currentHouse = (state.shelters ?? []).find((s) => s.id === currentId);
         const k = (currentHouse?.kind as string) ?? '';
         switch (k) {
@@ -1003,6 +1068,7 @@ export class HudBar {
   private renderHearts(hearts: number, maxHearts: number, invuln: boolean): void {
     this.heartsRow.textContent = '';
     this.heartsRow.classList.toggle('invuln', invuln);
+    this.heartsRow.classList.toggle('many', maxHearts > 6);
     for (let i = 0; i < maxHearts; i++) {
       const filled = i < hearts;
       const heart = el('span', {

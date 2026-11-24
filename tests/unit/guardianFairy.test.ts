@@ -248,7 +248,7 @@ describe('Guardian Fairy Visitor System (Core)', () => {
     expect(next.roamingMonsters[0]!.frozenTicks).toBeGreaterThanOrEqual(45);
   });
 
-  it('heals +1 missing heart after resting 40 ticks inside a Royal Castle and resets on exit', () => {
+  it('heals +1 missing heart after resting 15 ticks inside a Royal Castle and resets on exit', () => {
     const castle = DEFAULT_SHELTERS[0]!;
     let s = startPlaying({ seed: 15 });
     s = {
@@ -256,7 +256,7 @@ describe('Guardian Fairy Visitor System (Core)', () => {
       bots: [],
       orbs: [],
       hearts: 2,
-      shelteredTicks: 39,
+      shelteredTicks: 14,
       inShelter: true,
       currentShelterId: castle.id,
       shelterHealUsedId: null,
@@ -265,9 +265,9 @@ describe('Guardian Fairy Visitor System (Core)', () => {
       heading: 0,
     };
 
-    // Tick 40 inside castle heals +1 heart and marks shelterHealUsedId
+    // Tick 15 inside castle heals +1 heart and marks shelterHealUsedId
     s = reduce(s, { type: 'tick' });
-    expect(s.shelteredTicks).toBe(40);
+    expect(s.shelteredTicks).toBe(15);
     expect(s.hearts).toBe(3);
     expect(s.shelterHealUsedId).toBe(castle.id);
     expect(s.events.some((e) => e.kind === 'heart_gained')).toBe(true);

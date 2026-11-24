@@ -27,6 +27,7 @@ import { FORM_METADATA } from '../core/config';
 import { angleDiff, clamp } from '../core/systems/arena';
 import type { GamePhase, GameState, SnakeForm, Vec2 } from '../core/types';
 import type { BadgeTextureCache, CrownResources } from './labels3d';
+import { princessHeadHeight, princessMorphFactor } from './princess3d';
 import { cellToWorld } from './world';
 
 interface BodySegment {
@@ -707,6 +708,11 @@ export class SnakeView {
     return target.copy(this.headWorldPos);
   }
 
+  /** Align the floating 3D nameplate smoothly above the Fairy Princess's hair bun. */
+  syncPrincessNameplate(x: number, headTopY: number, z: number): void {
+    this.nameSprite.position.set(x, headTopY + 0.52, z);
+  }
+
   /** Number of rendered body segments behind the head. */
   getSegmentCount(): number {
     return this.segments.length;
@@ -860,6 +866,17 @@ export class SnakeView {
     this.animateChompJaw(elapsed, dt, headScale, state);
     this.animateBreathRig(elapsed, dt, state);
 
+    // 1b. Fairy Princess transformation: the head melts into the magic light
+    const princessMorph = gameover ? 0 : princessMorphFactor(state, a);
+    if (princessMorph > 0) {
+      const t = clamp((princessMorph - 0.3) / 0.5, 0, 1);
+      const headShrink = 1 - t * t * (3 - 2 * t);
+      this.headGroup.scale.multiplyScalar(Math.max(0.001, headShrink));
+      this.headGroup.visible = headShrink > 0.01;
+    } else {
+      this.headGroup.visible = true;
+    }
+
     // 2. Plump tapered body spine with subtle wave undulation
     const count = this.segments.length;
     const fallbackFx = Math.cos(state.heading);
@@ -901,6 +918,25 @@ export class SnakeView {
       } else {
         seg.mesh.rotation.y = Math.atan2(this.scratchForward.x, this.scratchForward.z);
       }
+
+      // Fairy Princess transformation: body spirals tail-first up into the light and vanishes
+      seg.mesh.visible = true;
+      if (princessMorph > 0) {
+        const k = clamp(princessMorph * 1.6 - (1 - (i + 1) / Math.max(1, count)) * 0.6, 0, 1);
+        if (k > 0) {
+          const ox = seg.mesh.position.x - this.headWorldPos.x;
+          const oz = seg.mesh.position.z - this.headWorldPos.z;
+          const ang = k * Math.PI * 2.5;
+          const c = Math.cos(ang);
+          const s = Math.sin(ang);
+          const shrink = 1 - k;
+          seg.mesh.position.x = this.headWorldPos.x + (ox * c - oz * s) * shrink;
+          seg.mesh.position.z = this.headWorldPos.z + (ox * s + oz * c) * shrink;
+          seg.mesh.position.y += k * 2.2 * (1 - k * 0.5);
+          seg.mesh.scale.setScalar(segScale * Math.max(0.001, shrink));
+          seg.mesh.visible = k < 0.995;
+        }
+      }
     }
 
     // 3. Cute blinking & eye glance toward steering target
@@ -922,7 +958,7 @@ export class SnakeView {
     this.animateStatusMaterials(elapsed, state);
 
     // 7. #1 Golden Crown & 3D Nameplate stacked cleanly above head
-    const showCrown = state.playerRank === 1 && !gameover;
+    const showCrown = state.playerRank === 1 && !gameover && princessMorph < 0.3;
     this.crownGroup.visible = showCrown;
     if (showCrown) {
       const crownScale = Math.max(1.0, this.currentThickness * 0.88);
@@ -935,7 +971,11 @@ export class SnakeView {
       this.crownGroup.rotation.y += dt * 1.5;
     }
 
-    const labelY = headBaseY + headScale * (showCrown ? 1.55 : 1.08);
+    const snakeLabelY = headBaseY + headScale * (showCrown ? 1.55 : 1.08);
+    const labelY =
+      princessMorph > 0.5
+        ? Math.max(snakeLabelY, princessHeadHeight(princessMorph) + 0.55)
+        : snakeLabelY;
     this.nameSprite.position.set(this.headWorldPos.x, labelY, this.headWorldPos.z);
     this.nameSprite.visible = !gameover;
 

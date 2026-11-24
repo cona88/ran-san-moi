@@ -852,7 +852,10 @@ export function stepRoamingMonsters(state: GameState): GameState {
   );
 
   // 3. Process combat, magic skills, sprays, player dash, and player damage
-  const isAirborne = state.butterflyStage === 'butterfly' || state.butterflyStage === 'cocoon';
+  const isAirborne =
+    state.butterflyStage === 'butterfly' ||
+    state.butterflyStage === 'cocoon' ||
+    (state.princessStage ?? 'snake') !== 'snake';
   const isDashing = state.isDashing;
   const hasSpray = state.sprayActiveTicks > 0;
   const hasShield = state.shieldTicks > 0;

@@ -88,6 +88,9 @@ export interface FrostZone {
 export type ShelterKind =
   'castle' | 'mushroom' | 'crystal' | 'mermaid' | 'candy' | 'blossom' | 'starlight';
 
+/** Fairy Princess transformation stages (snake ↔ beautiful flying fairy princess). */
+export type PrincessStage = 'snake' | 'transforming' | 'princess' | 'returning';
+
 export type GuardianFairyKind = 'blossom' | 'starlight' | 'crystal' | 'rainbow';
 export type GuardianFairyPhase = 'idle' | 'arriving' | 'escorting' | 'departing';
 
@@ -192,6 +195,27 @@ export interface BotSnake {
   readonly prevSpine: readonly Vec2[];
   readonly frozenTicks: number;
   readonly powerForm: SnakeForm;
+  /** Thử Thách Sinh Tồn: ticks until the bot may cast again. */
+  readonly magicCooldownTicks?: number;
+  /** >0 = telegraphing a spell (player can react). */
+  readonly magicWarningTicks?: number;
+  readonly magicSpell?: BotMagicKind;
+}
+
+export type BotMagicKind = 'bolt' | 'fire_spread' | 'frost_orb' | 'arcane_homing';
+
+export interface HostileProjectile {
+  readonly id: number;
+  readonly x: number;
+  readonly z: number;
+  readonly prevX: number;
+  readonly prevZ: number;
+  readonly dx: number;
+  readonly dz: number;
+  readonly kind: BotMagicKind;
+  readonly ownerBotId: number;
+  readonly ttl: number;
+  readonly maxTtl: number;
 }
 
 export interface LeaderboardEntry {
@@ -335,7 +359,15 @@ export type GameEventKind =
   | 'shelter_discovered'
   | 'fairy_visit_start'
   | 'fairy_blessing'
-  | 'fairy_visit_end';
+  | 'fairy_visit_end'
+  | 'princess_transform'
+  | 'princess_reveal'
+  | 'princess_return'
+  | 'princess_tour_start'
+  | 'princess_tour_lap'
+  | 'bot_shoot'
+  | 'bot_spell_cast'
+  | 'player_hit_by_magic';
 
 export interface GameEvent {
   readonly id: number;
@@ -346,6 +378,7 @@ export interface GameEvent {
   readonly chompStreak?: number;
   readonly messageVi?: string;
   readonly shelterId?: string;
+  readonly spell?: BotMagicKind;
 }
 
 export interface RngState {
@@ -423,6 +456,8 @@ export interface GameState {
   readonly questsSolved: number;
   readonly enemiesDefeated: number;
   readonly projectiles: readonly Projectile[];
+  readonly hostileProjectiles: readonly HostileProjectile[];
+  readonly playerSlowTicks: number;
   readonly silkWebs: readonly SilkWebZone[];
   readonly hazards: readonly Hazard[];
   readonly quest: BrainQuest | null;
@@ -459,6 +494,14 @@ export interface GameState {
   readonly shelteredTicks: number;
   readonly shelterHealUsedId: string | null;
   readonly guardianFairy: GuardianFairyState;
+  readonly princessStage: PrincessStage;
+  readonly princessTicks: number;
+  readonly princessMaxTicks: number;
+  readonly princessAltitude: number;
+  readonly princessCooldownTicks: number;
+  readonly princessTourShelterId: string | null;
+  readonly princessTourAngle: number;
+  readonly princessTourLaps: number;
 }
 
 export type GameAction =
@@ -489,4 +532,5 @@ export type GameAction =
     }
   | { readonly type: 'set_age_profile'; readonly ageProfile: AgeProfile }
   | { readonly type: 'cast_fairy_skill'; readonly skill: FairySkillKind }
+  | { readonly type: 'toggle_princess' }
   | { readonly type: 'set_butterfly_hold'; readonly active: boolean };

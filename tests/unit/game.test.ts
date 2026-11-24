@@ -110,7 +110,7 @@ describe('continuous 360° movement & boundaries', () => {
       s = reduce({ ...s, bots: [], orbs: [] }, { type: 'tick' });
     }
     expect(s.phase).toBe('playing');
-    expect(s.hearts).toBe(s.config.initialHearts);
+    expect(s.hearts).toBeGreaterThanOrEqual(s.config.initialHearts); // may regenerate in the start shelter
     expect(s.heading).toBeCloseTo(Math.PI, 2);
   });
 

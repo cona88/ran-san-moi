@@ -16,6 +16,7 @@ const RIGHT_STICK_DEADZONE = 0.15;
 const TRIGGER_THRESHOLD = 0.35;
 const AUTO_FIRE_INTERVAL_MS = 155;
 const FLOWER_AUTO_PLANT_INTERVAL_MS = 320;
+const R1_BUTTERFLY_CHORD_DELAY_MS = 75;
 
 const SONY_VENDOR_ID = 0x054c;
 const DUALSENSE_PRODUCT_ID = 0x0ce6;
@@ -39,6 +40,7 @@ const BTN_DPAD_UP = 12;
 const BTN_DPAD_DOWN = 13;
 const BTN_DPAD_LEFT = 14;
 const BTN_DPAD_RIGHT = 15;
+const BTN_PS = 16;
 const BTN_TOUCHPAD = 17;
 
 interface DualRumbleParams {
@@ -97,6 +99,8 @@ const RUMBLE_PRESETS: Readonly<Partial<Record<GameEventKind, RumbleSpec>>> = {
   quest_complete: { duration: 160, weakMagnitude: 0.65, strongMagnitude: 0.45 },
   shield_block: { duration: 210, weakMagnitude: 0.5, strongMagnitude: 0.75 },
   heart_lost: { duration: 210, weakMagnitude: 0.5, strongMagnitude: 0.75 },
+  player_hit_by_magic: { duration: 260, weakMagnitude: 0.7, strongMagnitude: 0.95 },
+  bot_spell_cast: { duration: 36, weakMagnitude: 0.2, strongMagnitude: 0.08 },
   bot_hit: { duration: 60, weakMagnitude: 0.4, strongMagnitude: 0.2 },
   bot_eaten: { duration: 190, weakMagnitude: 0.75, strongMagnitude: 0.55 },
   boss_spawn: { duration: 240, weakMagnitude: 0.65, strongMagnitude: 0.8 },
@@ -116,6 +120,10 @@ const RUMBLE_PRESETS: Readonly<Partial<Record<GameEventKind, RumbleSpec>>> = {
   fairy_visit_start: { duration: 150, weakMagnitude: 0.55, strongMagnitude: 0.25 },
   fairy_blessing: { duration: 70, weakMagnitude: 0.36, strongMagnitude: 0.12 },
   fairy_visit_end: { duration: 90, weakMagnitude: 0.3, strongMagnitude: 0.12 },
+  princess_transform: { duration: 260, weakMagnitude: 0.45, strongMagnitude: 0.18 },
+  princess_reveal: { duration: 240, weakMagnitude: 0.7, strongMagnitude: 0.35 },
+  princess_return: { duration: 140, weakMagnitude: 0.35, strongMagnitude: 0.12 },
+  princess_tour_lap: { duration: 110, weakMagnitude: 0.45, strongMagnitude: 0.2 },
 };
 
 const CHOMP_RUMBLE_DURATION_MS = 38;
@@ -144,6 +152,9 @@ interface LightbarFlashSpec {
 
 const BUTTERFLY_PINK_ICE_RGB: RgbColor = [255, 134, 224];
 const BUTTERFLY_ICE_CYAN_RGB: RgbColor = [138, 246, 255];
+const PIXIE_GOLD_RGB: RgbColor = [255, 228, 108];
+const PIXIE_LEAF_MINT_RGB: RgbColor = [124, 240, 132];
+const PIXIE_ROSE_RGB: RgbColor = [255, 150, 224];
 
 const SPRAY_LIGHTBAR_COLORS: Readonly<Record<SnakeForm, RgbColor>> = {
   dragon: [255, 92, 32],
@@ -211,6 +222,13 @@ const LIGHTBAR_EVENT_FLASHES: Readonly<Partial<Record<GameEventKind, LightbarFla
   fairy_visit_start: { rgb: [255, 165, 230], durationMs: 520 },
   fairy_blessing: { rgb: [255, 224, 128], durationMs: 280 },
   fairy_visit_end: { rgb: [215, 168, 255], durationMs: 360 },
+  princess_transform: { rgb: [255, 150, 235], durationMs: 900 },
+  princess_reveal: { rgb: [255, 220, 120], durationMs: 700 },
+  princess_return: { rgb: [190, 150, 255], durationMs: 420 },
+  princess_tour_start: { rgb: [255, 182, 238], durationMs: 400 },
+  princess_tour_lap: { rgb: [255, 228, 120], durationMs: 360 },
+  player_hit_by_magic: { rgb: [255, 24, 24], durationMs: 420 },
+  bot_spell_cast: { rgb: [255, 150, 30], durationMs: 150 },
 };
 
 const LIGHTBAR_EVENT_COLORS: Readonly<Partial<Record<GameEventKind, RgbColor>>> = {
@@ -222,12 +240,41 @@ const LIGHTBAR_EVENT_COLORS: Readonly<Partial<Record<GameEventKind, RgbColor>>> 
 const LIGHTBAR_EVENT_KINDS = new Set<GameEventKind>(['morph']);
 
 interface SteeringFeedback {
-  readonly stickEngaged: boolean;
-  readonly dpadEngaged: boolean;
-  readonly sharpTurn: boolean;
-  readonly isSteering: boolean;
-  readonly steerAngle: number | null;
+  stickEngaged: boolean;
+  dpadEngaged: boolean;
+  sharpTurn: boolean;
+  isSteering: boolean;
+  steerAngle: number | null;
 }
+
+/** Mutable, reused per-manager controller status (consumers read it synchronously each frame). */
+interface MutableControllerStatus {
+  connected: boolean;
+  isDualSense: boolean;
+  controllerName: string;
+  webHidConnected: boolean;
+  webHidSupported: boolean;
+  readonly pressedLabels: string[];
+  readonly leftStick: MutableStick;
+  readonly rightStick: MutableStick;
+}
+
+/** Buttons that give a practice micro-rumble / lightbar flash when newly pressed (priority order). */
+const PRACTICE_BUTTONS = [
+  BTN_TOUCHPAD,
+  BTN_L1,
+  BTN_R1,
+  BTN_L2,
+  BTN_R2,
+  BTN_L3,
+  BTN_R3,
+  BTN_TRIANGLE,
+  BTN_CIRCLE,
+  BTN_SQUARE,
+  BTN_CROSS,
+  BTN_CREATE,
+  BTN_OPTIONS,
+] as const;
 
 const CRC32_TABLE = (() => {
   const table = new Uint32Array(256);
@@ -294,20 +341,22 @@ function isTriggerPressed(buttons: readonly GamepadButton[], index: number): boo
   return Boolean(btn && (btn.value > TRIGGER_THRESHOLD || btn.pressed));
 }
 
-function normalizeStick(
-  rawX: number,
-  rawY: number,
-  deadzone: number,
-): { readonly x: number; readonly y: number } {
+interface MutableStick {
+  x: number;
+  y: number;
+}
+
+/** Writes the deadzone-normalized stick vector into `out` (no allocation). */
+function normalizeStickInto(out: MutableStick, rawX: number, rawY: number, deadzone: number): void {
   const mag = Math.hypot(rawX, rawY);
   if (mag < deadzone || mag === 0) {
-    return { x: 0, y: 0 };
+    out.x = 0;
+    out.y = 0;
+    return;
   }
   const scaled = Math.min(1, (mag - deadzone) / (1 - deadzone));
-  return {
-    x: clamp((rawX / mag) * scaled, -1, 1),
-    y: clamp((rawY / mag) * scaled, -1, 1),
-  };
+  out.x = clamp((rawX / mag) * scaled, -1, 1);
+  out.y = clamp((rawY / mag) * scaled, -1, 1);
 }
 
 function nowMs(): number {
@@ -347,12 +396,33 @@ function buildChompRumbleSpec(streakInput: number): RumbleSpec {
 export class DualSenseManager {
   private readonly handlers: ControlHandlers;
   private prevButtons: boolean[] = [];
+  private currButtons: boolean[] = [];
+  private readonly status: MutableControllerStatus = {
+    connected: false,
+    isDualSense: false,
+    controllerName: '',
+    webHidConnected: false,
+    webHidSupported: false,
+    pressedLabels: [],
+    leftStick: { x: 0, y: 0 },
+    rightStick: { x: 0, y: 0 },
+  };
+  private readonly steerFeedback: SteeringFeedback = {
+    stickEngaged: false,
+    dpadEngaged: false,
+    sharpTurn: false,
+    isSteering: false,
+    steerAngle: null,
+  };
   private prevShootPressed = false;
   private shootHoldMs = 0;
   private prevFlowerPressed = false;
   private flowerHoldMs = 0;
   private dashActive = false;
   private butterflyHoldActive = false;
+  private r1PendingMs = 0;
+  private princessChordLatched = false;
+  private princessLightbarActive = false;
   private lastStickAngle: number | null = null;
   private lastDpadAngle: number | null = null;
   private lastDetentAngle: number | null = null;
@@ -409,19 +479,19 @@ export class DualSenseManager {
       gamepad.id.trim() || (isDualSense ? 'DualSense Wireless Controller' : 'Gamepad');
 
     // Snapshot digital/trigger button states so all edge checks share a clean frame view.
-    const currButtons: boolean[] = [];
+    // Double-buffered (swap with prevButtons) to avoid a per-frame array allocation.
+    const currButtons = this.currButtons;
     const buttonCount = Math.max(buttons.length, BTN_TOUCHPAD + 1);
-    for (let i = 0; i < buttonCount; i++) {
-      if (i === BTN_L2 || i === BTN_R2) {
+    const fillCount = Math.max(buttonCount, currButtons.length);
+    for (let i = 0; i < fillCount; i++) {
+      if (i >= buttonCount) {
+        currButtons[i] = false;
+      } else if (i === BTN_L2 || i === BTN_R2) {
         currButtons[i] = isTriggerPressed(buttons, i);
       } else {
         currButtons[i] = isDigitalPressed(buttons, i);
       }
     }
-
-    const isPressed = (idx: number): boolean => Boolean(currButtons[idx]);
-    const justPressed = (idx: number): boolean =>
-      Boolean(currButtons[idx]) && !this.prevButtons[idx];
 
     const phaseResumedPlaying =
       this.prevPhase !== null && this.prevPhase !== 'playing' && state.phase === 'playing';
@@ -430,20 +500,16 @@ export class DualSenseManager {
     // 1 & 2. Smooth 360° Left Stick steering + 8-way D-Pad steering
     const rawLx = clamp(axes[0] ?? 0, -1, 1);
     const rawLy = clamp(axes[1] ?? 0, -1, 1);
-    const leftStick = normalizeStick(rawLx, rawLy, LEFT_STICK_DEADZONE);
-    const steerFeedback = this.handleSteering(
-      rawLx,
-      rawLy,
-      isPressed,
-      justPressed,
-      phaseResumedPlaying,
-      now,
-    );
+    const status = this.status;
+    const leftStick = status.leftStick;
+    normalizeStickInto(leftStick, rawLx, rawLy, LEFT_STICK_DEADZONE);
+    const steerFeedback = this.handleSteering(rawLx, rawLy, phaseResumedPlaying, now);
 
     // 3. Right Stick smooth 3D camera look (deadzone 0.15)
     const rawRx = clamp(axes[2] ?? 0, -1, 1);
     const rawRy = clamp(axes[3] ?? 0, -1, 1);
-    const rightStick = normalizeStick(rawRx, rawRy, RIGHT_STICK_DEADZONE);
+    const rightStick = status.rightStick;
+    normalizeStickInto(rightStick, rawRx, rawRy, RIGHT_STICK_DEADZONE);
     if (rightStick.x !== this.lastCameraX || rightStick.y !== this.lastCameraY) {
       this.lastCameraX = rightStick.x;
       this.lastCameraY = rightStick.y;
@@ -451,7 +517,7 @@ export class DualSenseManager {
     }
 
     // 4. Spray (R2 only) with 155ms auto-spray while held during 'playing'
-    const shootPressed = isPressed(BTN_R2);
+    const shootPressed = this.isPressed(BTN_R2);
     if (shootPressed && !this.prevShootPressed) {
       this.shootHoldMs = 0;
       this.handlers.shoot();
@@ -471,37 +537,85 @@ export class DualSenseManager {
     }
     this.prevShootPressed = shootPressed;
 
-    // 5. L2 + Face Button 360° Elemental AoE combos during 'playing'
-    const l2HeldDuringPlay = state.phase === 'playing' && isPressed(BTN_L2);
+    // 5. L2 + Face Button 360° Elemental AoE combos & Fairy Princess DualSense chords during 'playing'
+    const l2HeldDuringPlay = state.phase === 'playing' && this.isPressed(BTN_L2);
     let suppressSquareNormal = false;
     let suppressCircleNormal = false;
     let suppressTriangleNormal = false;
+    let suppressL1Thunder = false;
+    let suppressTouchpadAoe = false;
+
+    if (!this.isPressed(BTN_L1) && !this.isPressed(BTN_R1) && !this.isPressed(BTN_TOUCHPAD)) {
+      this.princessChordLatched = false;
+    }
+
+    if (state.phase === 'playing') {
+      const l1R1Chord =
+        this.isPressed(BTN_L1) &&
+        this.isPressed(BTN_R1) &&
+        (this.justPressed(BTN_L1) || this.justPressed(BTN_R1)) &&
+        !this.princessChordLatched;
+      const l2R1Chord = l2HeldDuringPlay && this.justPressed(BTN_R1) && !this.princessChordLatched;
+      const l2PadChord =
+        l2HeldDuringPlay && this.justPressed(BTN_TOUCHPAD) && !this.princessChordLatched;
+      const padReturnWhilePrincess =
+        !l2HeldDuringPlay &&
+        state.princessStage === 'princess' &&
+        this.justPressed(BTN_TOUCHPAD) &&
+        !this.princessChordLatched;
+
+      if (
+        l1R1Chord ||
+        l2R1Chord ||
+        l2PadChord ||
+        padReturnWhilePrincess ||
+        this.justPressed(BTN_PS)
+      ) {
+        this.princessChordLatched = true;
+        this.r1PendingMs = 0;
+        suppressL1Thunder = true;
+        suppressTouchpadAoe = true;
+        if (this.butterflyHoldActive) {
+          this.butterflyHoldActive = false;
+          this.handlers.setButterflyHold(false);
+        }
+        this.handlers.togglePrincess();
+        this.triggerPracticeRumble(
+          { duration: 95, weakMagnitude: 0.66, strongMagnitude: 0.26 },
+          16,
+          now,
+        );
+        if (this.isWebHidConnected()) {
+          this.triggerLightbarFlash(PIXIE_GOLD_RGB, 380, 2, now);
+        }
+      }
+    }
 
     if (l2HeldDuringPlay) {
-      if (justPressed(BTN_SQUARE)) {
+      if (this.justPressed(BTN_SQUARE)) {
         suppressSquareNormal = true;
         this.handlers.castFairySkill('fire');
       }
-      if (justPressed(BTN_CIRCLE)) {
+      if (this.justPressed(BTN_CIRCLE)) {
         suppressCircleNormal = true;
         this.handlers.castFairySkill('water');
       }
-      if (justPressed(BTN_TRIANGLE)) {
+      if (this.justPressed(BTN_TRIANGLE)) {
         suppressTriangleNormal = true;
         this.handlers.castFairySkill('arcane');
       }
-      if (justPressed(BTN_CROSS)) {
+      if (this.justPressed(BTN_CROSS)) {
         this.handlers.castFairySkill('thunder');
       }
     }
 
     // 5b. Morph forms (Triangle -> next, suppressed when L2 + Triangle casts AoE)
-    if (!suppressTriangleNormal && justPressed(BTN_TRIANGLE)) {
+    if (!suppressTriangleNormal && this.justPressed(BTN_TRIANGLE)) {
       this.handlers.morphNext();
     }
 
     // 6. Fairy Magic skills (Square w/o L2 -> flower w/ 320ms auto-plant, R1 -> hold butterfly, L1 -> thunder, Touchpad -> smart off-cooldown AoE)
-    const rawSquarePressed = isPressed(BTN_SQUARE);
+    const rawSquarePressed = this.isPressed(BTN_SQUARE);
     if (!l2HeldDuringPlay) {
       if (rawSquarePressed && !this.prevFlowerPressed && !suppressSquareNormal) {
         this.flowerHoldMs = 0;
@@ -526,32 +640,44 @@ export class DualSenseManager {
     this.prevFlowerPressed = rawSquarePressed;
 
     if (state.phase !== 'playing') {
+      this.r1PendingMs = 0;
       if (this.butterflyHoldActive) {
         this.butterflyHoldActive = false;
         this.handlers.setButterflyHold(false);
       }
     } else {
-      const r1Pressed = isPressed(BTN_R1);
-      if (r1Pressed && !this.butterflyHoldActive) {
-        this.butterflyHoldActive = true;
-        this.handlers.setButterflyHold(true);
-        this.triggerPracticeRumble(
-          { duration: 68, weakMagnitude: 0.62, strongMagnitude: 0.24 },
-          16,
-          now,
-        );
-        if (this.isWebHidConnected()) {
-          this.triggerLightbarFlash(BUTTERFLY_PINK_ICE_RGB, 280, 2, now);
+      const r1Pressed = this.isPressed(BTN_R1);
+      if (!r1Pressed) {
+        this.r1PendingMs = 0;
+        if (this.butterflyHoldActive) {
+          this.butterflyHoldActive = false;
+          this.handlers.setButterflyHold(false);
         }
-      } else if (!r1Pressed && this.butterflyHoldActive) {
-        this.butterflyHoldActive = false;
-        this.handlers.setButterflyHold(false);
+      } else if (
+        !this.butterflyHoldActive &&
+        !this.princessChordLatched &&
+        !l2HeldDuringPlay &&
+        (state.princessStage ?? 'snake') === 'snake'
+      ) {
+        this.r1PendingMs += Math.max(0, dtMs);
+        if (this.r1PendingMs >= R1_BUTTERFLY_CHORD_DELAY_MS) {
+          this.butterflyHoldActive = true;
+          this.handlers.setButterflyHold(true);
+          this.triggerPracticeRumble(
+            { duration: 68, weakMagnitude: 0.62, strongMagnitude: 0.24 },
+            16,
+            now,
+          );
+          if (this.isWebHidConnected()) {
+            this.triggerLightbarFlash(BUTTERFLY_PINK_ICE_RGB, 280, 2, now);
+          }
+        }
       }
     }
-    if (justPressed(BTN_L1)) {
+    if (!suppressL1Thunder && !l2HeldDuringPlay && this.justPressed(BTN_L1)) {
       this.handlers.castFairySkill('thunder');
     }
-    if (state.phase === 'playing' && justPressed(BTN_TOUCHPAD)) {
+    if (state.phase === 'playing' && !suppressTouchpadAoe && this.justPressed(BTN_TOUCHPAD)) {
       const smartAoe: FairySkillKind | null =
         state.fireCooldownTicks === 0
           ? 'fire'
@@ -568,23 +694,23 @@ export class DualSenseManager {
     }
 
     // 6b. Bubble Shield (Circle, suppressed when L2 + Circle casts AoE)
-    if (!suppressCircleNormal && justPressed(BTN_CIRCLE)) {
+    if (!suppressCircleNormal && this.justPressed(BTN_CIRCLE)) {
       this.handlers.shield();
     }
 
     // 7. Three Magical Boosters (L3 -> +10 Level, Create/Share -> Speed, R3 -> Magnet)
-    if (justPressed(BTN_L3)) {
+    if (this.justPressed(BTN_L3)) {
       this.handlers.activateBooster('level');
     }
-    if (justPressed(BTN_CREATE)) {
+    if (this.justPressed(BTN_CREATE)) {
       this.handlers.activateBooster('speed');
     }
-    if (justPressed(BTN_R3)) {
+    if (this.justPressed(BTN_R3)) {
       this.handlers.activateBooster('magnet');
     }
 
     // 8. Pause toggle (Options)
-    if (justPressed(BTN_OPTIONS)) {
+    if (this.justPressed(BTN_OPTIONS)) {
       this.handlers.togglePause();
     }
 
@@ -594,11 +720,11 @@ export class DualSenseManager {
         this.dashActive = false;
         this.handlers.setDash(false);
       }
-      if (justPressed(BTN_CROSS)) {
+      if (this.justPressed(BTN_CROSS)) {
         this.handlers.primary();
       }
     } else {
-      const nextDash = isPressed(BTN_CROSS) || isPressed(BTN_L2);
+      const nextDash = this.isPressed(BTN_CROSS) || this.isPressed(BTN_L2);
       if (nextDash !== this.dashActive) {
         this.dashActive = nextDash;
         this.handlers.setDash(nextDash);
@@ -606,20 +732,18 @@ export class DualSenseManager {
     }
 
     // 10. Tactile DualSense practice micro-rumble + vibrant lightbar color flashes
-    this.applyPracticeFeedback(state, currButtons, justPressed, steerFeedback, now);
+    this.applyPracticeFeedback(state, steerFeedback, now);
 
+    this.currButtons = this.prevButtons;
     this.prevButtons = currButtons;
 
-    return {
-      connected: true,
-      isDualSense,
-      controllerName,
-      webHidConnected: this.isWebHidConnected(),
-      webHidSupported: this.isWebHidSupported(),
-      pressedLabels: this.collectPressedLabels(currButtons),
-      leftStick,
-      rightStick,
-    };
+    status.connected = true;
+    status.isDualSense = isDualSense;
+    status.controllerName = controllerName;
+    status.webHidConnected = this.isWebHidConnected();
+    status.webHidSupported = this.isWebHidSupported();
+    this.collectPressedLabels(currButtons, status.pressedLabels);
+    return status;
   }
 
   /** Trigger gamepad rumble haptics and WebHID lightbar updates in response to game events. */
@@ -785,6 +909,34 @@ export class DualSenseManager {
 
     if (this.lightbarFlashActive && now >= this.lightbarFlashUntilMs) {
       this.restoreFormLightbar(state.form);
+      return;
+    }
+
+    const princessActive =
+      state.phase === 'playing' && (state.princessStage ?? 'snake') !== 'snake';
+    if (princessActive) {
+      this.princessLightbarActive = true;
+      if (
+        !this.lightbarFlashActive &&
+        !this.chompLightbarActive &&
+        now - this.lastHoldLightbarMs >= 200
+      ) {
+        this.lastHoldLightbarMs = now;
+        this.holdLightbarPhase = (this.holdLightbarPhase + 1) % 3;
+        const pixieRgb =
+          this.holdLightbarPhase === 0
+            ? PIXIE_GOLD_RGB
+            : this.holdLightbarPhase === 1
+              ? PIXIE_LEAF_MINT_RGB
+              : PIXIE_ROSE_RGB;
+        this.lastLightbarPacketMs = now;
+        void this.sendLightbarRgb(pixieRgb);
+      }
+    } else if (this.princessLightbarActive) {
+      this.princessLightbarActive = false;
+      if (!this.lightbarFlashActive && !this.chompLightbarActive) {
+        this.restoreFormLightbar(state.form);
+      }
     }
   }
 
@@ -829,33 +981,11 @@ export class DualSenseManager {
     this.triggerRumble(spec);
   }
 
-  private applyPracticeFeedback(
-    state: GameState,
-    currButtons: readonly boolean[],
-    justPressed: (idx: number) => boolean,
-    steer: SteeringFeedback,
-    now: number,
-  ): void {
+  private applyPracticeFeedback(state: GameState, steer: SteeringFeedback, now: number): void {
     // 1. Crisp micro-rumble + vibrant RGB lightbar flash on any newly pressed button
-    const practiceButtons = [
-      BTN_TOUCHPAD,
-      BTN_L1,
-      BTN_R1,
-      BTN_L2,
-      BTN_R2,
-      BTN_L3,
-      BTN_R3,
-      BTN_TRIANGLE,
-      BTN_CIRCLE,
-      BTN_SQUARE,
-      BTN_CROSS,
-      BTN_CREATE,
-      BTN_OPTIONS,
-    ] as const;
-
     let handledJustPressed = false;
-    for (const btnIdx of practiceButtons) {
-      if (!justPressed(btnIdx)) continue;
+    for (const btnIdx of PRACTICE_BUTTONS) {
+      if (!this.justPressed(btnIdx)) continue;
       if (btnIdx === BTN_R1 && this.butterflyHoldActive) {
         handledJustPressed = true;
         break;
@@ -906,11 +1036,11 @@ export class DualSenseManager {
     }
 
     // 3. Joyful continuous hold feedback while spraying (R2), flying butterfly (R1), dashing (L2/Cross), or steering
-    const r2Held = Boolean(currButtons[BTN_R2]);
+    const r2Held = this.isPressed(BTN_R2);
     const r1HeldButterfly =
-      state.phase === 'playing' && Boolean(currButtons[BTN_R1]) && this.butterflyHoldActive;
-    const l2Held = Boolean(currButtons[BTN_L2]);
-    const crossHeld = Boolean(currButtons[BTN_CROSS]);
+      state.phase === 'playing' && this.isPressed(BTN_R1) && this.butterflyHoldActive;
+    const l2Held = this.isPressed(BTN_L2);
+    const crossHeld = this.isPressed(BTN_CROSS);
     const holdingDash = state.phase === 'playing' && (l2Held || crossHeld) && this.dashActive;
 
     if (r2Held) {
@@ -964,6 +1094,18 @@ export class DualSenseManager {
         this.triggerLightbarFlash(dashRgb, 160, 1, now);
       }
     } else if (
+      state.phase === 'playing' &&
+      state.princessStage === 'princess' &&
+      steer.isSteering &&
+      now - this.lastHoldRumbleMs >= 190
+    ) {
+      this.lastHoldRumbleMs = now;
+      this.triggerPracticeRumble(
+        { duration: 22, weakMagnitude: 0.2, strongMagnitude: 0.05 },
+        160,
+        now,
+      );
+    } else if (
       steer.isSteering &&
       this.isWebHidConnected() &&
       steer.steerAngle !== null &&
@@ -994,28 +1136,31 @@ export class DualSenseManager {
     return fallback;
   }
 
-  private cardinalDpadDirection(
-    dpadDx: number,
-    dpadDz: number,
-    justPressed: (idx: number) => boolean,
-  ): Direction | null {
-    if (dpadDz === -1 && justPressed(BTN_DPAD_UP)) return 'up';
-    if (dpadDz === 1 && justPressed(BTN_DPAD_DOWN)) return 'down';
-    if (dpadDx === -1 && justPressed(BTN_DPAD_LEFT)) return 'left';
-    if (dpadDx === 1 && justPressed(BTN_DPAD_RIGHT)) return 'right';
+  private isPressed(idx: number): boolean {
+    return Boolean(this.currButtons[idx]);
+  }
+
+  private justPressed(idx: number): boolean {
+    return Boolean(this.currButtons[idx]) && !this.prevButtons[idx];
+  }
+
+  private cardinalDpadDirection(dpadDx: number, dpadDz: number): Direction | null {
+    if (dpadDz === -1 && this.justPressed(BTN_DPAD_UP)) return 'up';
+    if (dpadDz === 1 && this.justPressed(BTN_DPAD_DOWN)) return 'down';
+    if (dpadDx === -1 && this.justPressed(BTN_DPAD_LEFT)) return 'left';
+    if (dpadDx === 1 && this.justPressed(BTN_DPAD_RIGHT)) return 'right';
     return null;
   }
 
   private handleSteering(
     rawLx: number,
     rawLy: number,
-    isPressed: (idx: number) => boolean,
-    justPressed: (idx: number) => boolean,
     phaseResumedPlaying: boolean,
     now: number,
   ): SteeringFeedback {
-    const dpadDx = (isPressed(BTN_DPAD_RIGHT) ? 1 : 0) - (isPressed(BTN_DPAD_LEFT) ? 1 : 0);
-    const dpadDz = (isPressed(BTN_DPAD_DOWN) ? 1 : 0) - (isPressed(BTN_DPAD_UP) ? 1 : 0);
+    const dpadDx =
+      (this.isPressed(BTN_DPAD_RIGHT) ? 1 : 0) - (this.isPressed(BTN_DPAD_LEFT) ? 1 : 0);
+    const dpadDz = (this.isPressed(BTN_DPAD_DOWN) ? 1 : 0) - (this.isPressed(BTN_DPAD_UP) ? 1 : 0);
     const dpadActive = dpadDx !== 0 || dpadDz !== 0;
     const dpadAngle = dpadActive ? Math.atan2(dpadDz, dpadDx) : null;
     const dpadEngaged = this.lastDpadAngle === null && dpadAngle !== null;
@@ -1025,7 +1170,7 @@ export class DualSenseManager {
     const stickEngaged = this.lastStickAngle === null && stickAngle !== null;
 
     if (stickAngle === null && dpadActive && (dpadDx === 0 || dpadDz === 0)) {
-      const cardinalDir = this.cardinalDpadDirection(dpadDx, dpadDz, justPressed);
+      const cardinalDir = this.cardinalDpadDirection(dpadDx, dpadDz);
       if (cardinalDir) {
         this.handlers.turn(cardinalDir);
       }
@@ -1053,13 +1198,7 @@ export class DualSenseManager {
         this.lastStickAngle = stickAngle;
         this.handlers.steer(stickAngle);
       }
-      return {
-        stickEngaged,
-        dpadEngaged,
-        sharpTurn,
-        isSteering: true,
-        steerAngle: stickAngle,
-      };
+      return this.setSteerFeedback(stickEngaged, dpadEngaged, sharpTurn, true, stickAngle);
     }
 
     const stickJustReleased = this.lastStickAngle !== null;
@@ -1076,13 +1215,7 @@ export class DualSenseManager {
         this.handlers.steer(dpadAngle);
       }
       this.lastDetentAngle = dpadAngle;
-      return {
-        stickEngaged: false,
-        dpadEngaged,
-        sharpTurn: false,
-        isSteering: true,
-        steerAngle: dpadAngle,
-      };
+      return this.setSteerFeedback(false, dpadEngaged, false, true, dpadAngle);
     }
 
     const dpadJustReleased = this.lastDpadAngle !== null;
@@ -1091,17 +1224,27 @@ export class DualSenseManager {
     if (stickJustReleased || dpadJustReleased) {
       this.handlers.steer(null);
     }
-    return {
-      stickEngaged: false,
-      dpadEngaged: false,
-      sharpTurn: false,
-      isSteering: false,
-      steerAngle: null,
-    };
+    return this.setSteerFeedback(false, false, false, false, null);
   }
 
-  private collectPressedLabels(currButtons: readonly boolean[]): readonly string[] {
-    const labels: string[] = [];
+  private setSteerFeedback(
+    stickEngaged: boolean,
+    dpadEngaged: boolean,
+    sharpTurn: boolean,
+    isSteering: boolean,
+    steerAngle: number | null,
+  ): SteeringFeedback {
+    const fb = this.steerFeedback;
+    fb.stickEngaged = stickEngaged;
+    fb.dpadEngaged = dpadEngaged;
+    fb.sharpTurn = sharpTurn;
+    fb.isSteering = isSteering;
+    fb.steerAngle = steerAngle;
+    return fb;
+  }
+
+  private collectPressedLabels(currButtons: readonly boolean[], labels: string[]): void {
+    labels.length = 0;
     if (currButtons[BTN_CROSS]) labels.push('✕');
     if (currButtons[BTN_CIRCLE]) labels.push('○');
     if (currButtons[BTN_SQUARE]) labels.push('□');
@@ -1123,7 +1266,7 @@ export class DualSenseManager {
     if (currButtons[BTN_TOUCHPAD]) labels.push('Touchpad');
     if (currButtons[BTN_CREATE]) labels.push('Create');
     if (currButtons[BTN_OPTIONS]) labels.push('Options');
-    return labels;
+    if (currButtons[BTN_PS]) labels.push('PS');
   }
 
   private triggerRumble(spec: RumbleSpec): void {
@@ -1222,11 +1365,13 @@ export class DualSenseManager {
   }
 
   private resetInputOnDisconnect(): void {
-    this.prevButtons = [];
+    this.prevButtons.fill(false);
     this.prevShootPressed = false;
     this.shootHoldMs = 0;
     this.prevFlowerPressed = false;
     this.flowerHoldMs = 0;
+    this.r1PendingMs = 0;
+    this.princessChordLatched = false;
     this.prevPhase = null;
     this.lastDetentAngle = null;
     this.lastSteerDetentMs = -Infinity;
@@ -1255,15 +1400,17 @@ export class DualSenseManager {
   }
 
   private disconnectedStatus(): ControllerStatus {
-    return {
-      connected: false,
-      isDualSense: false,
-      controllerName: '',
-      webHidConnected: this.isWebHidConnected(),
-      webHidSupported: this.isWebHidSupported(),
-      pressedLabels: [],
-      leftStick: { x: 0, y: 0 },
-      rightStick: { x: 0, y: 0 },
-    };
+    const status = this.status;
+    status.connected = false;
+    status.isDualSense = false;
+    status.controllerName = '';
+    status.webHidConnected = this.isWebHidConnected();
+    status.webHidSupported = this.isWebHidSupported();
+    status.pressedLabels.length = 0;
+    status.leftStick.x = 0;
+    status.leftStick.y = 0;
+    status.rightStick.x = 0;
+    status.rightStick.y = 0;
+    return status;
   }
 }
