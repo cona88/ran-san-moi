@@ -1,9 +1,13 @@
-import { Vector3 } from 'three';
+import { Group, Vector3, type Scene } from 'three';
+import { ADVENTURE_REGIONS, getRegionAt } from '../core/adventure';
+import { CASTLE_ROYAL_SETS } from '../core/castleInterior';
 import { FORM_METADATA } from '../core/config';
 import { activeSize } from '../core/systems/arena';
 import type { Cell, GameConfig, GameEvent, GameState, SnakeForm, VisualTheme } from '../core/types';
 import { Board } from './board';
 import { BotsView } from './bots';
+import { CastleInterior3DView } from './castleInterior3d';
+import { ClimateWeather3DView } from './climateWeather3d';
 import { FairyMagicView } from './fairyMagic3d';
 import { FoodView } from './food';
 import { GuardianFairy3DView } from './guardianFairy3d';
@@ -16,8 +20,10 @@ import { ParticleSystem } from './particles';
 import { ProjectilesView } from './projectiles';
 import { SceneRig } from './scene';
 import { RoamingMonstersView, Shelter3DView } from './shelter3d';
+import { SkySpectacle3DView } from './skySpectacle3d';
 import { SnakeView } from './snake';
-import { cellToWorld, halfOf } from './world';
+import { cellToWorld, halfOf, lerpGridToWorld } from './world';
+import { WorldScenery3DView } from './worldScenery3d';
 
 function sprayWaveHex(form: SnakeForm): number {
   switch (form) {
@@ -38,6 +44,7 @@ function sprayWaveHex(form: SnakeForm): number {
  */
 export class GameRenderer {
   private readonly rig: SceneRig;
+  private readonly outerWorldRoot = new Group();
   private readonly board = new Board();
   private readonly badgeCache = new BadgeTextureCache();
   private readonly crownResources = new CrownResources();
@@ -53,9 +60,16 @@ export class GameRenderer {
   private readonly roamingMonstersView: RoamingMonstersView;
   private readonly guardianFairyView: GuardianFairy3DView;
   private readonly princessView: PrincessFairy3DView;
+  private readonly castleInteriorView: CastleInterior3DView;
   private readonly hostileMagic: HostileMagicView;
+  private readonly worldSceneryView: WorldScenery3DView;
+  private readonly skySpectacleView: SkySpectacle3DView;
+  private readonly climateWeatherView: ClimateWeather3DView;
   private readonly princessSparkPos = new Vector3();
   private princessSparkAcc = 0;
+  private wasInCastleInterior = false;
+  private lastInteriorShelterId: string | null = null;
+  private savedPanoramicBeforeCastle = false;
 
   private readonly half: number;
   private renderedMargin = -1;
@@ -88,21 +102,27 @@ export class GameRenderer {
   constructor(container: HTMLElement, config: GameConfig) {
     this.half = halfOf(config.maxGrid);
     this.rig = new SceneRig(container, 11.5);
-    this.rig.scene.add(this.board.group);
+    this.rig.scene.add(this.outerWorldRoot);
+    this.outerWorldRoot.add(this.board.group);
+    const outerScene = this.outerWorldRoot as unknown as Scene;
 
     this.snakeView = new SnakeView(this.rig.scene, this.half, this.badgeCache, this.crownResources);
-    this.botsView = new BotsView(this.rig.scene, this.half, this.badgeCache, this.crownResources);
-    this.foodView = new FoodView(this.rig.scene, this.half);
-    this.projectilesView = new ProjectilesView(this.rig.scene, this.half);
-    this.obstaclesView = new ObstaclesView(this.rig.scene, this.half, this.badgeCache);
-    this.labels3dView = new Labels3DView(this.rig.scene, this.half, this.badgeCache);
+    this.botsView = new BotsView(outerScene, this.half, this.badgeCache, this.crownResources);
+    this.foodView = new FoodView(outerScene, this.half);
+    this.projectilesView = new ProjectilesView(outerScene, this.half);
+    this.obstaclesView = new ObstaclesView(outerScene, this.half, this.badgeCache);
+    this.labels3dView = new Labels3DView(outerScene, this.half, this.badgeCache);
     this.particles = new ParticleSystem(this.rig.scene);
-    this.fairyMagic = new FairyMagicView(this.rig.scene, config.maxGrid);
-    this.shelterView = new Shelter3DView(this.rig.scene, config.maxGrid);
-    this.roamingMonstersView = new RoamingMonstersView(this.rig.scene);
-    this.guardianFairyView = new GuardianFairy3DView(this.rig.scene);
+    this.fairyMagic = new FairyMagicView(outerScene, config.maxGrid);
+    this.shelterView = new Shelter3DView(outerScene, config.maxGrid);
+    this.roamingMonstersView = new RoamingMonstersView(outerScene);
+    this.guardianFairyView = new GuardianFairy3DView(outerScene);
     this.princessView = new PrincessFairy3DView(this.rig.scene);
-    this.hostileMagic = new HostileMagicView(this.rig.scene);
+    this.castleInteriorView = new CastleInterior3DView(this.rig.scene);
+    this.hostileMagic = new HostileMagicView(outerScene);
+    this.worldSceneryView = new WorldScenery3DView(outerScene, config.worldRadius);
+    this.skySpectacleView = new SkySpectacle3DView(outerScene);
+    this.climateWeatherView = new ClimateWeather3DView(outerScene);
 
     this.setTheme(this.currentTheme);
   }
@@ -137,7 +157,12 @@ export class GameRenderer {
     this.snakeView.onTick(state);
 
     const head = state.snake[0];
-    if (head && (!this.hasSyncedCamera || state.phase === 'ready')) {
+    this.rig.setIntroOrbit(state.phase === 'ready' && state.castleInterior === null);
+    if (
+      state.castleInterior === null &&
+      head &&
+      (!this.hasSyncedCamera || state.phase === 'ready')
+    ) {
       cellToWorld(head.x, head.z, this.half, this.headCamPos);
       this.rig.snapFollowTarget(this.headCamPos.x, this.headCamPos.z, state.level);
       this.hasSyncedCamera = true;
@@ -148,6 +173,8 @@ export class GameRenderer {
 
   /** Sync projectiles, bots, hazards, quest orbs & world orbs without disturbing snake interpolation. */
   syncProjectiles(state: GameState): void {
+    this.syncCastleTransition(state);
+    this.castleInteriorView.sync(state);
     this.foodView.sync(state);
     this.botsView.sync(state);
     this.obstaclesView.sync(state);
@@ -165,15 +192,20 @@ export class GameRenderer {
     this.roamingMonstersView.sync(state);
     this.guardianFairyView.sync(state);
     this.hostileMagic.sync(state);
+    this.worldSceneryView.sync(state);
   }
 
   /** Trigger magical 3D particle bursts, camera shake & zoom pulses in response to a `GameEvent`. */
   onEvent(event: GameEvent, state: GameState): void {
-    const cell = event.cell ?? state.snake[0];
-    if (cell) {
-      cellToWorld(cell.x, cell.z, this.half, this.eventPos);
+    if (state.castleInterior !== null) {
+      cellToWorld(state.castleInterior.pos.x, state.castleInterior.pos.z, this.half, this.eventPos);
     } else {
-      this.eventPos.set(0, 0, 0);
+      const cell = event.cell ?? state.snake[0];
+      if (cell) {
+        cellToWorld(cell.x, cell.z, this.half, this.eventPos);
+      } else {
+        this.eventPos.set(0, 0, 0);
+      }
     }
 
     const form = event.form ?? state.form;
@@ -539,6 +571,78 @@ export class GameRenderer {
         this.particles.burstStars(this.eventPos, 0xffe066, 18, 4.6, 1.1, true);
         this.rig.triggerZoomPulse(-0.02);
         break;
+      case 'region_discovered': {
+        const regHex = event.regionId ? ADVENTURE_REGIONS[event.regionId].colorHex : 0x7ef8ff;
+        this.eventPos.y += aerialLift;
+        this.particles.multiRingStarburst(this.eventPos, regHex, 0xffe066, 20, 5.2, 1.18);
+        this.particles.expandingWave(this.eventPos, regHex, 4.2, 0.65, 0.25);
+        this.particles.burstStars(this.eventPos, 0xfff3b0, 18, 4.6, 1.05, true);
+        this.rig.triggerZoomPulse(-0.028);
+        break;
+      }
+      case 'landmark_discovered': {
+        const lm = state.landmarks?.find((l) => l.id === event.landmarkId);
+        const lmHex = lm?.colorHex ?? 0xffd700;
+        this.eventPos.y += aerialLift;
+        this.particles.fireworks(this.eventPos);
+        this.particles.multiRingStarburst(this.eventPos, lmHex, 0xffd700, 28, 6.8, 1.4);
+        this.particles.multiRingStarburst(this.eventPos, 0x7ef8ff, lmHex, 22, 5.4, 1.2);
+        this.particles.expandingWave(this.eventPos, lmHex, 5.8, 0.78, 0.4);
+        this.particles.expandingWave(this.eventPos, 0xffea78, 4.2, 0.62, 0.2);
+        this.rig.triggerShake(0.22, 0.28);
+        this.rig.triggerZoomPulse(0.055);
+        break;
+      }
+      case 'chapter_complete':
+        this.eventPos.y += aerialLift;
+        this.particles.fireworks(this.eventPos);
+        this.particles.multiRingStarburst(this.eventPos, 0xffd700, 0xff70d0, 30, 7.2, 1.45);
+        this.particles.multiRingStarburst(this.eventPos, 0x5cf6ff, 0xffe066, 24, 6.0, 1.3);
+        this.particles.expandingWave(this.eventPos, 0xffd700, 6.8, 0.85, 0.45);
+        this.particles.expandingWave(this.eventPos, 0xff85c0, 5.0, 0.68, 0.25);
+        this.rig.triggerShake(0.28, 0.34);
+        this.rig.triggerZoomPulse(0.065);
+        break;
+      case 'castle_enter_interior': {
+        const set = event.shelterKind ? CASTLE_ROYAL_SETS[event.shelterKind] : null;
+        const primaryHex = set ? set.gownPrimaryHex : 0xffd700;
+        const crownHex = set ? set.crownHex : 0xffe066;
+        this.eventPos.y += 1.2;
+        this.particles.multiRingStarburst(this.eventPos, crownHex, primaryHex, 24, 5.6, 1.25);
+        this.particles.burstStars(this.eventPos, 0xfff3b0, 22, 4.8, 1.15, true);
+        this.eventPos.y = 0.1;
+        this.particles.expandingWave(this.eventPos, crownHex, 4.2, 0.65, 0.3);
+        this.particles.expandingWave(this.eventPos, primaryHex, 2.8, 0.5, 0.15);
+        this.rig.triggerZoomPulse(-0.025);
+        break;
+      }
+      case 'castle_exit_interior': {
+        const set = event.shelterKind ? CASTLE_ROYAL_SETS[event.shelterKind] : null;
+        const accentHex = set ? set.crownHex : 0x7ef8ff;
+        this.eventPos.y += 0.8;
+        this.particles.multiRingStarburst(this.eventPos, accentHex, 0xffe066, 18, 4.8, 1.1);
+        this.particles.expandingWave(this.eventPos, accentHex, 3.4, 0.55, 0.2);
+        this.rig.triggerZoomPulse(-0.02);
+        break;
+      }
+      case 'castle_item_equipped': {
+        const set = event.shelterKind ? CASTLE_ROYAL_SETS[event.shelterKind] : null;
+        const primaryHex = set
+          ? event.cosmeticSlot === 'weapon'
+            ? set.weaponPrimaryHex
+            : event.cosmeticSlot === 'makeup'
+              ? set.crownHex
+              : set.gownPrimaryHex
+          : 0xffe066;
+        const secondaryHex = set ? set.gownGoldHex : 0xff85c0;
+        this.eventPos.y += 1.35;
+        this.particles.multiRingStarburst(this.eventPos, primaryHex, secondaryHex, 22, 5.0, 1.2);
+        this.particles.burstStars(this.eventPos, 0xfff5c0, 20, 4.5, 1.1, true);
+        this.eventPos.y = 0.08;
+        this.particles.expandingWave(this.eventPos, primaryHex, 3.2, 0.56, 0.22);
+        this.rig.triggerZoomPulse(-0.022);
+        break;
+      }
     }
   }
 
@@ -548,6 +652,24 @@ export class GameRenderer {
     this.rig.setTheme(theme);
     this.board.setTheme(theme);
     this.foodView.setTheme(theme);
+    this.worldSceneryView.setTheme(theme);
+    this.skySpectacleView.setTheme(theme);
+    this.climateWeatherView.setTheme(theme);
+  }
+
+  /** Enable or disable cinematic panoramic horizon camera mode. */
+  setPanoramicMode(enabled: boolean): void {
+    this.rig.setPanoramicMode(enabled);
+  }
+
+  /** Toggle cinematic panoramic horizon camera mode and return the new state. */
+  togglePanoramicMode(): boolean {
+    return this.rig.togglePanoramicMode();
+  }
+
+  /** Whether cinematic panoramic horizon camera mode is currently active. */
+  isPanoramicMode(): boolean {
+    return this.rig.isPanoramicMode();
   }
 
   /** Smoothly tilt the 3D camera view from normalized Right Stick input (-1..1). */
@@ -563,6 +685,62 @@ export class GameRenderer {
     delta: number,
     state: GameState,
   ): void {
+    this.syncCastleTransition(state);
+    this.castleInteriorView.sync(state);
+
+    const interior = state.castleInterior;
+    if (interior !== null) {
+      lerpGridToWorld(
+        interior.prevPos.x,
+        interior.prevPos.z,
+        interior.pos.x,
+        interior.pos.z,
+        alpha,
+        this.half,
+        this.headCamPos,
+      );
+      this.snakeView.draw(alpha, elapsed, delta, state);
+      this.princessView.draw(elapsed, delta, state, this.headCamPos, alpha);
+      if (this.princessView.isVisible()) {
+        this.princessView.getPrincessWorldPosition(this.princessSparkPos);
+        this.headCamPos.x = this.princessSparkPos.x;
+        this.headCamPos.z = this.princessSparkPos.z;
+        this.snakeView.syncPrincessNameplate(
+          this.princessSparkPos.x,
+          this.princessView.getHeadTopWorldY(),
+          this.princessSparkPos.z,
+        );
+      }
+
+      const camDt = Math.min(Math.max(delta, 0), 0.1);
+      const camSmooth = 1 - Math.exp(-7 * camDt);
+      this.aerialCamAltitude += (1.0 - this.aerialCamAltitude) * camSmooth;
+
+      this.rig.setIntroOrbit(false);
+      this.rig.setVistaBlend(0.32);
+      this.rig.setExtraZoom(0.16);
+      this.rig.setClimateRegion('royal_citadel');
+      const followX = this.headCamPos.x * 0.85;
+      const followZ = this.headCamPos.z * 0.78 + 3.2;
+      this.rig.update(elapsed, delta, followX, followZ, 5, this.aerialCamAltitude);
+
+      this.princessSparkAcc += camDt;
+      const sparkInterval = interior.isDashing ? 0.032 : 0.065;
+      if (this.princessSparkAcc >= sparkInterval) {
+        this.princessSparkAcc %= sparkInterval;
+        this.princessView.getPrincessWorldPosition(this.princessSparkPos);
+        this.princessSparkPos.y = Math.max(0.18, this.princessSparkPos.y - 0.35);
+        const outfitKind = state.wardrobe?.equippedOutfit ?? interior.shelterKind;
+        const sparkHex = CASTLE_ROYAL_SETS[outfitKind].gownGoldHex;
+        this.particles.bodyTrailSpark(this.princessSparkPos, sparkHex, 0.54, false);
+      }
+
+      this.castleInteriorView.draw(elapsed, delta, state);
+      this.particles.update(delta);
+      this.rig.render();
+      return;
+    }
+
     this.board.animate(elapsed);
     this.snakeView.draw(alpha, elapsed, delta, state);
     this.snakeView.getHeadWorldPosition(this.headCamPos);
@@ -586,12 +764,68 @@ export class GameRenderer {
     const camSmooth = state.phase === 'ready' ? 1 : 1 - Math.exp(-7 * camDt);
     this.aerialCamAltitude += (targetAltitude - this.aerialCamAltitude) * camSmooth;
 
-    // Sightseeing camera: pull back to admire the castle while the princess tours it
+    // Sightseeing & Colossal Wonder vista camera: pull back and tilt toward the horizon
+    // when touring castles as Princess, flying high, or admiring a Colossal Landmark / Sanctuary.
+    this.rig.setIntroOrbit(state.phase === 'ready');
     const touring = state.princessStage === 'princess' && state.princessTourShelterId !== null;
+    let landmarkVista = 0;
+    if (state.phase === 'playing' && state.landmarks) {
+      for (let i = 0; i < state.landmarks.length; i++) {
+        const lm = state.landmarks[i]!;
+        const d = Math.hypot(this.headCamPos.x - lm.x, this.headCamPos.z - lm.z);
+        if (d < 38) {
+          const t = Math.max(0, Math.min(1, (38 - d) / 20));
+          const s = t * t * (3 - 2 * t);
+          if (s > landmarkVista) landmarkVista = s;
+        }
+      }
+    }
+    let shelterVista = 0;
+    if (state.phase === 'playing' && state.shelters) {
+      for (let i = 0; i < state.shelters.length; i++) {
+        const sh = state.shelters[i]!;
+        const d = Math.hypot(this.headCamPos.x - sh.x, this.headCamPos.z - sh.z);
+        if (d < 28) {
+          const t = Math.max(0, Math.min(1, (28 - d) / 14));
+          const s = t * t * (3 - 2 * t) * 0.62;
+          if (s > shelterVista) shelterVista = s;
+        }
+      }
+    }
+    const rimDist =
+      state.config.worldRadius - Math.max(Math.abs(this.headCamPos.x), Math.abs(this.headCamPos.z));
+    const rimVista =
+      state.phase === 'playing' && rimDist < 24
+        ? Math.max(0, Math.min(1, (24 - rimDist) / 20)) * 0.68
+        : 0;
+    const panoramicOn = this.rig.isPanoramicMode();
+    const vistaBlend =
+      state.phase !== 'playing'
+        ? 0.12
+        : panoramicOn
+          ? 0.9
+          : Math.max(
+              0.12,
+              landmarkVista * 0.78,
+              shelterVista,
+              princessMorph * 0.78,
+              butterflyAlt > 0.4 ? 0.62 : 0,
+              rimVista,
+            );
+    this.rig.setVistaBlend(vistaBlend);
     this.rig.setExtraZoom(
-      state.phase !== 'playing' ? 0 : touring ? 0.26 : princessMorph > 0 ? 0.14 * princessMorph : 0,
+      state.phase !== 'playing'
+        ? 0
+        : Math.max(
+            panoramicOn ? 0.85 : 0,
+            touring ? 0.42 : princessMorph > 0 ? 0.32 * princessMorph : 0,
+            landmarkVista * (panoramicOn ? 1.15 : 0.9),
+            shelterVista * 0.32,
+            rimVista * 0.35,
+          ),
     );
 
+    this.rig.setClimateRegion(getRegionAt(this.headCamPos).id);
     this.rig.update(
       elapsed,
       delta,
@@ -781,6 +1015,9 @@ export class GameRenderer {
     this.roamingMonstersView.draw(elapsed, delta, state);
     this.guardianFairyView.draw(elapsed, delta, state, this.headCamPos);
     this.hostileMagic.draw(alpha, projectileAlpha, elapsed, state);
+    this.worldSceneryView.draw(elapsed, delta, state, this.headCamPos);
+    this.skySpectacleView.draw(elapsed, delta, state, this.headCamPos);
+    this.climateWeatherView.draw(elapsed, delta, state, this.headCamPos);
     this.particles.update(delta);
     this.rig.render();
   }
@@ -824,11 +1061,53 @@ export class GameRenderer {
     this.roamingMonstersView.dispose();
     this.guardianFairyView.dispose();
     this.princessView.dispose();
+    this.castleInteriorView.dispose();
     this.hostileMagic.dispose();
+    this.worldSceneryView.dispose();
+    this.skySpectacleView.dispose();
+    this.climateWeatherView.dispose();
     this.badgeCache.dispose();
     this.crownResources.dispose();
     this.board.dispose();
+    this.rig.scene.remove(this.outerWorldRoot);
     this.rig.dispose();
+  }
+
+  private syncCastleTransition(state: GameState): void {
+    const interior = state.castleInterior;
+    const inCastle = interior !== null;
+    this.outerWorldRoot.visible = !inCastle;
+
+    if (inCastle && interior) {
+      if (!this.wasInCastleInterior || interior.shelterId !== this.lastInteriorShelterId) {
+        if (!this.wasInCastleInterior) {
+          this.savedPanoramicBeforeCastle = this.rig.isPanoramicMode();
+          if (this.savedPanoramicBeforeCastle) {
+            this.rig.setPanoramicMode(false);
+          }
+        }
+        this.wasInCastleInterior = true;
+        this.lastInteriorShelterId = interior.shelterId;
+        this.rig.setIntroOrbit(false);
+        this.aerialCamAltitude = 1.0;
+        this.rig.snapFollowTarget(interior.pos.x * 0.85, interior.pos.z * 0.78 + 3.2, 5);
+        this.rig.setVistaBlend(0.32);
+        this.rig.setExtraZoom(0.16);
+      }
+    } else if (this.wasInCastleInterior) {
+      this.wasInCastleInterior = false;
+      this.lastInteriorShelterId = null;
+      if (this.savedPanoramicBeforeCastle) {
+        this.rig.setPanoramicMode(true);
+        this.savedPanoramicBeforeCastle = false;
+      }
+      const head = state.snake[0];
+      if (head) {
+        cellToWorld(head.x, head.z, this.half, this.headCamPos);
+        this.aerialCamAltitude = 0;
+        this.rig.snapFollowTarget(this.headCamPos.x, this.headCamPos.z, state.level);
+      }
+    }
   }
 
   private computeMuzzlePos(

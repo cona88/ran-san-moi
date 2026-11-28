@@ -5,6 +5,7 @@ import {
   DynamicDrawUsage,
   Euler,
   Fog,
+  HemisphereLight,
   InstancedMesh,
   Matrix4,
   MeshBasicMaterial,
@@ -23,13 +24,20 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import type { VisualTheme } from '../core/types';
+import type { AdventureRegionId, VisualTheme } from '../core/types';
 import { cameraFitDistance } from './cameraFit';
 import { THEMES } from './palette';
 
 const FOV = 50;
-const FOG_NEAR = 44;
-const FOG_FAR = 128;
+const FOG_NEAR = 125;
+const FOG_FAR = 860;
+const CAMERA_FAR = 1550;
+const INTRO_ORBIT_RADIUS = 48;
+const INTRO_ORBIT_ELEV_RAD = (15 * Math.PI) / 180;
+const INTRO_ORBIT_SPEED = 0.11;
+const INTRO_LOOK_Y = 14.5;
+const PANORAMIC_VISTA_BLEND = 0.9;
+const DEFAULT_ADVENTURE_VISTA = 0.12;
 const MAX_LOOK_OFFSET = 4.2;
 const AMBIENT_PARTICLE_COUNT = 84;
 const SNAP_DISTANCE_SQ = 12 * 12;
@@ -44,6 +52,98 @@ interface AmbientMote {
   readonly scale: number;
   readonly spinSpeed: number;
 }
+
+interface ClimateLightingSpec {
+  readonly dirTint: number;
+  readonly dirIntensityMult: number;
+  readonly hemiSky: number;
+  readonly hemiGround: number;
+  readonly hemiIntensity: number;
+  readonly fogTint: number;
+  readonly fogNearMult: number;
+  readonly fogFarMult: number;
+  readonly tintStrength: number;
+}
+
+const CLIMATE_LIGHTING: Readonly<Record<AdventureRegionId, ClimateLightingSpec>> = {
+  royal_citadel: {
+    dirTint: 0xffe49e,
+    dirIntensityMult: 1.06,
+    hemiSky: 0x9edbff,
+    hemiGround: 0x82b868,
+    hemiIntensity: 0.44,
+    fogTint: 0xf7e6be,
+    fogNearMult: 1.04,
+    fogFarMult: 1.05,
+    tintStrength: 0.46,
+  },
+  mushroom_woods: {
+    dirTint: 0x9cf0c8,
+    dirIntensityMult: 0.8,
+    hemiSky: 0x5cc4a2,
+    hemiGround: 0x2c6e49,
+    hemiIntensity: 0.5,
+    fogTint: 0x3b8a78,
+    fogNearMult: 0.6,
+    fogFarMult: 0.56,
+    tintStrength: 0.62,
+  },
+  blossom_valley: {
+    dirTint: 0xffd2e5,
+    dirIntensityMult: 1.0,
+    hemiSky: 0xffd8ec,
+    hemiGround: 0x92cf7e,
+    hemiIntensity: 0.48,
+    fogTint: 0xf7cde0,
+    fogNearMult: 0.94,
+    fogFarMult: 0.92,
+    tintStrength: 0.54,
+  },
+  crystal_sanctum: {
+    dirTint: 0xcbeeff,
+    dirIntensityMult: 1.1,
+    hemiSky: 0xb8e6ff,
+    hemiGround: 0xd8f3ff,
+    hemiIntensity: 0.56,
+    fogTint: 0xbce6fa,
+    fogNearMult: 0.84,
+    fogFarMult: 0.78,
+    tintStrength: 0.6,
+  },
+  mermaid_lagoon: {
+    dirTint: 0xd4f4ff,
+    dirIntensityMult: 1.08,
+    hemiSky: 0x7ae2ff,
+    hemiGround: 0x32cbb8,
+    hemiIntensity: 0.5,
+    fogTint: 0x9ae8f5,
+    fogNearMult: 1.0,
+    fogFarMult: 0.98,
+    tintStrength: 0.56,
+  },
+  candy_highlands: {
+    dirTint: 0xffcc88,
+    dirIntensityMult: 1.05,
+    hemiSky: 0xffe2ad,
+    hemiGround: 0xd49a6a,
+    hemiIntensity: 0.46,
+    fogTint: 0xf7cfa0,
+    fogNearMult: 0.96,
+    fogFarMult: 0.94,
+    tintStrength: 0.56,
+  },
+  starlight_peaks: {
+    dirTint: 0xbaa8ff,
+    dirIntensityMult: 0.84,
+    hemiSky: 0x7d74e8,
+    hemiGround: 0x454e88,
+    hemiIntensity: 0.48,
+    fogTint: 0x4d4c8c,
+    fogNearMult: 0.76,
+    fogFarMult: 0.7,
+    tintStrength: 0.62,
+  },
+};
 
 function clamp(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, v));
@@ -68,6 +168,7 @@ export class SceneRig {
 
   private readonly ambientLight: AmbientLight;
   private readonly dirLight: DirectionalLight;
+  private readonly hemiLight: HemisphereLight;
   private readonly fillLight: PointLight;
   private readonly accentLight: PointLight;
 
@@ -87,6 +188,12 @@ export class SceneRig {
   private readonly scratchColor = new Color();
 
   private readonly cameraDir = new Vector3(0, 17, 10.5);
+  private readonly vistaDir = new Vector3(0, 5.0, 27.0).normalize();
+  private readonly blendedDir = new Vector3();
+  private readonly scratchFollowPos = new Vector3();
+  private readonly scratchFollowLook = new Vector3();
+  private readonly scratchOrbitPos = new Vector3();
+  private readonly scratchOrbitLook = new Vector3();
   private readonly baseDistance: number;
   private fittedDistance = 20;
 
@@ -100,6 +207,13 @@ export class SceneRig {
   private aerialAltitude = 0;
   private extraZoomTarget = 0;
   private extraZoom = 0;
+  private vistaTarget = DEFAULT_ADVENTURE_VISTA;
+  private vistaBlend = DEFAULT_ADVENTURE_VISTA;
+  private panoramicMode = false;
+  private introOrbitActive = false;
+  private introOrbitBlend = 0;
+  private introOrbitAngle = -0.18;
+  private hasSnappedIntro = false;
 
   private targetLookX = 0;
   private targetLookZ = 0;
@@ -119,6 +233,29 @@ export class SceneRig {
   private baseAccentIntensity = 0.24;
 
   private currentTheme: VisualTheme = 'honeycomb_arena';
+  private targetClimateRegion: AdventureRegionId = 'royal_citadel';
+
+  private readonly curDirColor = new Color();
+  private readonly targetDirColor = new Color();
+  private curDirIntensity = 0.92;
+  private targetDirIntensity = 0.92;
+
+  private readonly curHemiSky = new Color();
+  private readonly targetHemiSky = new Color();
+  private readonly curHemiGround = new Color();
+  private readonly targetHemiGround = new Color();
+  private curHemiIntensity = 0.44;
+  private targetHemiIntensity = 0.44;
+
+  private readonly curFogColor = new Color();
+  private readonly targetFogColor = new Color();
+  private readonly curBgColor = new Color();
+  private readonly targetBgColor = new Color();
+  private curFogNearMult = 1;
+  private targetFogNearMult = 1;
+  private curFogFarMult = 1;
+  private targetFogFarMult = 1;
+  private readonly scratchClimateColor = new Color();
 
   constructor(
     private readonly container: HTMLElement,
@@ -147,7 +284,7 @@ export class SceneRig {
     this.fog = new Fog(palette.fogColor, FOG_NEAR, FOG_FAR);
     this.scene.fog = this.fog;
 
-    this.camera = new PerspectiveCamera(FOV, w / h, 0.1, 340);
+    this.camera = new PerspectiveCamera(FOV, w / h, 0.1, CAMERA_FAR);
 
     this.ambientLight = new AmbientLight(palette.ambientColor, palette.ambientIntensity);
     this.scene.add(this.ambientLight);
@@ -155,6 +292,9 @@ export class SceneRig {
     this.dirLight = new DirectionalLight(palette.dirColor, palette.dirIntensity);
     this.dirLight.position.set(14, 26, 16);
     this.scene.add(this.dirLight);
+
+    this.hemiLight = new HemisphereLight(0x9edbff, 0x82b868, 0.44);
+    this.scene.add(this.hemiLight);
 
     this.fillLight = new PointLight(palette.fillColor, palette.fillIntensity, 64);
     this.fillLight.position.set(-10, 8, -9);
@@ -189,15 +329,14 @@ export class SceneRig {
   setTheme(theme: VisualTheme): void {
     this.currentTheme = theme;
     const palette = THEMES[theme];
-    (this.scene.background as Color).setHex(palette.background);
-    this.fog.color.setHex(palette.fogColor);
 
     this.ambientLight.color.setHex(palette.ambientColor);
     this.ambientLight.intensity = palette.ambientIntensity;
-    this.dirLight.color.setHex(palette.dirColor);
-    this.dirLight.intensity = palette.dirIntensity;
     this.fillLight.color.setHex(palette.fillColor);
     this.accentLight.color.setHex(palette.accentColor);
+
+    this.recomputeClimateTargets();
+    this.applyClimateImmediate();
 
     // Anti-glare bloom & fill/accent vibrancy tuning: keep warm/pastel arenas crisp while VFX glow.
     if (theme === 'honeycomb_arena') {
@@ -259,9 +398,39 @@ export class SceneRig {
     this.zoomPulse = clamp(this.zoomPulse + amount, -0.16, 0.2);
   }
 
-  /** Smoothly pull the camera back (e.g. `0.4` = 40% farther) for sightseeing tours. */
+  /** Smoothly pull the camera back (e.g. `0.85` = 85% farther) for panoramic vistas & sightseeing tours. */
   setExtraZoom(amount: number): void {
-    this.extraZoomTarget = Number.isFinite(amount) ? clamp(amount, 0, 1) : 0;
+    this.extraZoomTarget = Number.isFinite(amount) ? clamp(amount, 0, 1.15) : 0;
+  }
+
+  /** Smoothly tilt toward a panoramic horizon vista (`0..1`) around colossal landmarks & aerial flight. */
+  setVistaBlend(amount: number): void {
+    this.vistaTarget = Number.isFinite(amount) ? clamp(amount, 0, 1) : DEFAULT_ADVENTURE_VISTA;
+  }
+
+  /** Toggle cinematic panoramic horizon mode (`0.72` smooth horizon lock). */
+  setPanoramicMode(enabled: boolean): void {
+    this.panoramicMode = enabled;
+  }
+
+  /** Flip cinematic panoramic horizon mode and return the new state. */
+  togglePanoramicMode(): boolean {
+    this.panoramicMode = !this.panoramicMode;
+    return this.panoramicMode;
+  }
+
+  /** Whether cinematic panoramic horizon mode is currently enabled. */
+  isPanoramicMode(): boolean {
+    return this.panoramicMode;
+  }
+
+  /** Enable or disable the title-screen panoramic intro orbit around Central Royal Castle. */
+  setIntroOrbit(active: boolean): void {
+    if (active && !this.introOrbitActive && !this.hasSnappedIntro) {
+      this.introOrbitBlend = 1;
+      this.hasSnappedIntro = true;
+    }
+    this.introOrbitActive = active;
   }
 
   /** Set normalized camera look offset (-1..1) from DualSense Right Stick. */
@@ -281,6 +450,10 @@ export class SceneRig {
     this.currentZoom = this.targetZoom;
     this.zoomPulse = 0;
     this.aerialAltitude = 0;
+    const baseVista = this.panoramicMode ? PANORAMIC_VISTA_BLEND : DEFAULT_ADVENTURE_VISTA;
+    this.vistaTarget = baseVista;
+    this.vistaBlend = baseVista;
+    this.introOrbitBlend = this.introOrbitActive ? 1 : 0;
     this.shakeTimer = 0;
     this.shakeOffsetX = 0;
     this.shakeOffsetY = 0;
@@ -318,7 +491,21 @@ export class SceneRig {
     this.targetZoom = this.computeZoomScale(playerLevel);
     const zoomSmooth = 1 - Math.exp(-5 * dt);
     this.currentZoom += (this.targetZoom - this.currentZoom) * zoomSmooth;
-    this.extraZoom += (this.extraZoomTarget - this.extraZoom) * (1 - Math.exp(-2.2 * dt));
+    this.extraZoom += (this.extraZoomTarget - this.extraZoom) * (1 - Math.exp(-3.2 * dt));
+    const effectiveVistaTarget = this.panoramicMode ? PANORAMIC_VISTA_BLEND : this.vistaTarget;
+    this.vistaBlend += (effectiveVistaTarget - this.vistaBlend) * (1 - Math.exp(-3.2 * dt));
+
+    if (this.introOrbitActive) {
+      this.introOrbitAngle += INTRO_ORBIT_SPEED * dt;
+    }
+    const introTarget = this.introOrbitActive ? 1 : 0;
+    const introRate = this.introOrbitActive ? 3.2 : 2.6;
+    this.introOrbitBlend += (introTarget - this.introOrbitBlend) * (1 - Math.exp(-introRate * dt));
+    if (!this.introOrbitActive && this.introOrbitBlend < 1e-4) {
+      this.introOrbitBlend = 0;
+    } else if (this.introOrbitActive && this.introOrbitBlend > 0.9999) {
+      this.introOrbitBlend = 1;
+    }
 
     if (this.zoomPulse !== 0) {
       this.zoomPulse *= Math.exp(-9 * dt);
@@ -359,8 +546,16 @@ export class SceneRig {
     this.accentLight.intensity =
       this.baseAccentIntensity * (1 + 0.07 * Math.cos(elapsed * 1.9 + 0.8));
 
+    this.updateClimateLighting(dt);
     this.applyCameraTransform();
     this.updateAmbientMotes(elapsed);
+  }
+
+  /** Set target kingdom climate region for smooth directional/hemisphere/fog blending. */
+  setClimateRegion(regionId: AdventureRegionId): void {
+    if (this.targetClimateRegion === regionId) return;
+    this.targetClimateRegion = regionId;
+    this.recomputeClimateTargets();
   }
 
   /** Render one frame through the bloom composer. */
@@ -405,11 +600,97 @@ export class SceneRig {
 
   dispose(): void {
     this.scene.remove(this.ambientMesh);
+    this.scene.remove(this.ambientLight);
+    this.scene.remove(this.dirLight);
+    this.scene.remove(this.hemiLight);
+    this.scene.remove(this.fillLight);
+    this.scene.remove(this.accentLight);
+    this.ambientLight.dispose();
+    this.dirLight.dispose();
+    this.hemiLight.dispose();
+    this.fillLight.dispose();
+    this.accentLight.dispose();
     this.ambientGeometry.dispose();
     this.ambientMaterial.dispose();
     this.composer.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
+  }
+
+  private recomputeClimateTargets(): void {
+    const palette = THEMES[this.currentTheme];
+    const spec = CLIMATE_LIGHTING[this.targetClimateRegion];
+    const isDarkTheme =
+      this.currentTheme === 'crystal_garden' || this.currentTheme === 'starlight_galaxy';
+    const isPastelTheme = this.currentTheme === 'candy_island';
+
+    const dirMix = isDarkTheme ? spec.tintStrength * 0.55 : spec.tintStrength * 0.82;
+    const fogMix = isDarkTheme
+      ? spec.tintStrength * 0.34
+      : isPastelTheme
+        ? spec.tintStrength * 0.65
+        : spec.tintStrength * 0.86;
+    const hemiMix = isDarkTheme ? 0.55 : 0.28;
+    const hemiScale = isDarkTheme ? 0.72 : 1.0;
+
+    this.targetDirColor
+      .setHex(palette.dirColor)
+      .lerp(this.scratchClimateColor.setHex(spec.dirTint), dirMix);
+    this.targetDirIntensity = palette.dirIntensity * spec.dirIntensityMult;
+
+    this.targetHemiSky
+      .setHex(spec.hemiSky)
+      .lerp(this.scratchClimateColor.setHex(palette.ambientColor), hemiMix);
+    this.targetHemiGround
+      .setHex(spec.hemiGround)
+      .lerp(this.scratchClimateColor.setHex(palette.floorBase), hemiMix);
+    this.targetHemiIntensity = spec.hemiIntensity * hemiScale;
+
+    this.targetFogColor
+      .setHex(palette.fogColor)
+      .lerp(this.scratchClimateColor.setHex(spec.fogTint), fogMix);
+    this.targetBgColor
+      .setHex(palette.background)
+      .lerp(this.scratchClimateColor.setHex(spec.fogTint), fogMix);
+    this.targetFogNearMult = spec.fogNearMult;
+    this.targetFogFarMult = spec.fogFarMult;
+  }
+
+  private applyClimateImmediate(): void {
+    this.curDirColor.copy(this.targetDirColor);
+    this.curDirIntensity = this.targetDirIntensity;
+    this.curHemiSky.copy(this.targetHemiSky);
+    this.curHemiGround.copy(this.targetHemiGround);
+    this.curHemiIntensity = this.targetHemiIntensity;
+    this.curFogColor.copy(this.targetFogColor);
+    this.curBgColor.copy(this.targetBgColor);
+    this.curFogNearMult = this.targetFogNearMult;
+    this.curFogFarMult = this.targetFogFarMult;
+    this.syncClimateObjects();
+  }
+
+  private updateClimateLighting(dt: number): void {
+    const smooth = 1 - Math.exp(-1.8 * dt);
+    this.curDirColor.lerp(this.targetDirColor, smooth);
+    this.curDirIntensity += (this.targetDirIntensity - this.curDirIntensity) * smooth;
+    this.curHemiSky.lerp(this.targetHemiSky, smooth);
+    this.curHemiGround.lerp(this.targetHemiGround, smooth);
+    this.curHemiIntensity += (this.targetHemiIntensity - this.curHemiIntensity) * smooth;
+    this.curFogColor.lerp(this.targetFogColor, smooth);
+    this.curBgColor.lerp(this.targetBgColor, smooth);
+    this.curFogNearMult += (this.targetFogNearMult - this.curFogNearMult) * smooth;
+    this.curFogFarMult += (this.targetFogFarMult - this.curFogFarMult) * smooth;
+    this.syncClimateObjects();
+  }
+
+  private syncClimateObjects(): void {
+    this.dirLight.color.copy(this.curDirColor);
+    this.dirLight.intensity = this.curDirIntensity;
+    this.hemiLight.color.copy(this.curHemiSky);
+    this.hemiLight.groundColor.copy(this.curHemiGround);
+    this.hemiLight.intensity = this.curHemiIntensity;
+    this.fog.color.copy(this.curFogColor);
+    (this.scene.background as Color).copy(this.curBgColor);
   }
 
   private computeZoomScale(level: number): number {
@@ -507,27 +788,54 @@ export class SceneRig {
     const effectiveZoom = Math.max(0.78, this.currentZoom * (1 + this.extraZoom) + this.zoomPulse);
     const dist = this.fittedDistance * effectiveZoom;
     const scale = dist / this.baseDistance;
-    this.fog.near = FOG_NEAR * scale;
-    this.fog.far = FOG_FAR * scale;
+    this.fog.near = FOG_NEAR * scale * this.curFogNearMult;
+    this.fog.far = FOG_FAR * scale * this.curFogFarMult;
+
+    const vBlend = this.vistaBlend;
+    this.blendedDir.copy(this.cameraDir);
+    if (vBlend > 1e-4) {
+      this.blendedDir.lerp(this.vistaDir, vBlend).normalize();
+    }
 
     const lookX = this.currentFollowX + this.currentLookX + this.shakeOffsetX * 0.45;
     const lookY =
-      (this.aerialAltitude > 0.005 ? this.aerialAltitude * 0.55 : 0) + this.shakeOffsetY * 0.35;
-    const lookZ = this.currentFollowZ + this.currentLookZ + this.shakeOffsetZ * 0.45;
+      (this.aerialAltitude > 0.005 ? this.aerialAltitude * 0.55 : 0) +
+      vBlend * 14.5 +
+      this.shakeOffsetY * 0.35;
+    const lookZ =
+      this.currentFollowZ + this.currentLookZ - vBlend * 22.0 + this.shakeOffsetZ * 0.45;
 
     const aerialY = this.aerialAltitude > 0.005 ? this.aerialAltitude * 1.5 : 0;
     const aerialZ = this.aerialAltitude > 0.005 ? this.aerialAltitude * 1.2 : 0;
 
-    this.camera.position.set(
-      this.currentFollowX + this.cameraDir.x * dist + this.currentLookX * 0.45 + this.shakeOffsetX,
-      this.cameraDir.y * dist - this.currentLookZ * 0.2 + aerialY + this.shakeOffsetY,
+    this.scratchFollowPos.set(
+      this.currentFollowX + this.blendedDir.x * dist + this.currentLookX * 0.45 + this.shakeOffsetX,
+      this.blendedDir.y * dist - this.currentLookZ * 0.2 + aerialY + this.shakeOffsetY,
       this.currentFollowZ +
-        this.cameraDir.z * dist +
+        this.blendedDir.z * dist +
         this.currentLookZ * 0.3 +
         aerialZ +
         this.shakeOffsetZ,
     );
-    this.camera.lookAt(lookX, lookY, lookZ);
+    this.scratchFollowLook.set(lookX, lookY, lookZ);
+
+    if (this.introOrbitBlend > 1e-4) {
+      const horizR = INTRO_ORBIT_RADIUS * Math.cos(INTRO_ORBIT_ELEV_RAD);
+      const orbitY = INTRO_ORBIT_RADIUS * Math.sin(INTRO_ORBIT_ELEV_RAD);
+      this.scratchOrbitPos.set(
+        Math.sin(this.introOrbitAngle) * horizR,
+        orbitY,
+        Math.cos(this.introOrbitAngle) * horizR,
+      );
+      this.scratchOrbitLook.set(0, INTRO_LOOK_Y, 0);
+      const b = this.introOrbitBlend;
+      const smooth = b * b * (3 - 2 * b);
+      this.scratchFollowPos.lerp(this.scratchOrbitPos, smooth);
+      this.scratchFollowLook.lerp(this.scratchOrbitLook, smooth);
+    }
+
+    this.camera.position.copy(this.scratchFollowPos);
+    this.camera.lookAt(this.scratchFollowLook);
     this.camera.updateMatrixWorld();
 
     this.fillLight.position.set(this.currentFollowX - 10, 8, this.currentFollowZ - 9);

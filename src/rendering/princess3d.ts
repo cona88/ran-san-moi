@@ -1,5 +1,6 @@
 import {
   AdditiveBlending,
+  BoxGeometry,
   CanvasTexture,
   CircleGeometry,
   Color,
@@ -25,8 +26,9 @@ import {
   type Material,
   type Scene,
 } from 'three';
+import { CASTLE_ROYAL_SETS } from '../core/castleInterior';
 import { FORM_METADATA } from '../core/config';
-import type { GameState, SnakeForm } from '../core/types';
+import type { GameState, ShelterKind, SignatureWeaponKind, SnakeForm } from '../core/types';
 
 /** Base hover height (world Y) of the pixie's feet when barely lifted. */
 export const PRINCESS_BASE_Y = 0.5;
@@ -180,6 +182,215 @@ function createRibbonTailGeometry(width: number, length: number): ExtrudeGeometr
     bevelEnabled: false,
     curveSegments: 8,
   });
+}
+
+export interface BuiltCosmeticAsset {
+  readonly group: Group;
+  readonly geometries: BufferGeometry[];
+  readonly materials: Material[];
+}
+
+/**
+ * Shared 3D Royal Crown / Tiara builder used on both the Fairy Princess's head
+ * and the Castle Interior Makeup & Crown Pedestal.
+ */
+export function buildRoyalCrownMesh(
+  crownHex: number,
+  gemHex: number,
+): BuiltCosmeticAsset & {
+  readonly crownMat: MeshStandardMaterial;
+  readonly gemMat: MeshStandardMaterial;
+} {
+  const group = new Group();
+  const geometries: BufferGeometry[] = [];
+  const crownMat = new MeshStandardMaterial({
+    color: crownHex,
+    emissive: crownHex,
+    emissiveIntensity: 0.48,
+    metalness: 0.72,
+    roughness: 0.18,
+  });
+  const gemMat = new MeshStandardMaterial({
+    color: gemHex,
+    emissive: gemHex,
+    emissiveIntensity: 0.78,
+    metalness: 0.25,
+    roughness: 0.12,
+  });
+  const pearlMat = new MeshBasicMaterial({ color: 0xffffff });
+  const materials: Material[] = [crownMat, gemMat, pearlMat];
+
+  const bandGeo = new TorusGeometry(0.2, 0.024, 8, 24);
+  bandGeo.rotateX(Math.PI / 2);
+  const spireGeo = new ConeGeometry(0.036, 0.16, 6);
+  const tallSpireGeo = new ConeGeometry(0.048, 0.24, 6);
+  const centerGemGeo = new OctahedronGeometry(0.068, 0);
+  const tipPearlGeo = new SphereGeometry(0.022, 8, 8);
+  geometries.push(bandGeo, spireGeo, tallSpireGeo, centerGemGeo, tipPearlGeo);
+
+  group.add(new Mesh(bandGeo, crownMat));
+
+  const centerSpire = new Mesh(tallSpireGeo, crownMat);
+  centerSpire.position.set(0, 0.12, 0.19);
+  const centerGem = new Mesh(centerGemGeo, gemMat);
+  centerGem.position.set(0, 0.11, 0.22);
+  const topPearl = new Mesh(tipPearlGeo, pearlMat);
+  topPearl.position.set(0, 0.25, 0.19);
+  group.add(centerSpire, centerGem, topPearl);
+
+  for (const i of [-2, -1, 1, 2] as const) {
+    const a = i * 0.44;
+    const h = Math.abs(i) === 1 ? 0.16 : 0.12;
+    const sp = new Mesh(spireGeo, crownMat);
+    sp.scale.y = h / 0.16;
+    sp.position.set(Math.sin(a) * 0.195, h * 0.5, Math.cos(a) * 0.195);
+    const tip = new Mesh(tipPearlGeo, Math.abs(i) === 1 ? gemMat : pearlMat);
+    tip.position.set(Math.sin(a) * 0.195, h + 0.015, Math.cos(a) * 0.195);
+    group.add(sp, tip);
+  }
+
+  return { group, crownMat, gemMat, geometries, materials };
+}
+
+/**
+ * Shared 3D Signature Weapon builder rendering all 7 distinct royal weapons
+ * (`y = 0` at grip, extending along `+Y`) for both the Fairy Princess's right hand
+ * and the Castle Interior Weapon Display Pedestal.
+ */
+export function buildSignatureWeaponMesh(
+  kind: SignatureWeaponKind,
+  primaryHex: number,
+  accentHex: number,
+): BuiltCosmeticAsset {
+  const group = new Group();
+  const geometries: BufferGeometry[] = [];
+  const primaryMat = new MeshStandardMaterial({
+    color: primaryHex,
+    emissive: primaryHex,
+    emissiveIntensity: 0.52,
+    metalness: 0.62,
+    roughness: 0.2,
+  });
+  const accentMat = new MeshStandardMaterial({
+    color: accentHex,
+    emissive: accentHex,
+    emissiveIntensity: 0.72,
+    metalness: 0.3,
+    roughness: 0.15,
+  });
+  const glowMat = new MeshBasicMaterial({ color: 0xffffff });
+  const materials: Material[] = [primaryMat, accentMat, glowMat];
+
+  const addMesh = (geo: BufferGeometry, mat: Material): Mesh => {
+    geometries.push(geo);
+    const m = new Mesh(geo, mat);
+    group.add(m);
+    return m;
+  };
+
+  // Base handle shaft shared across weapons (except crystal_bow which uses a bow riser)
+  if (kind !== 'crystal_bow') {
+    const shaftLen = kind === 'royal_sword' || kind === 'pixie_wand' ? 0.42 : 1.08;
+    const shaftY = kind === 'royal_sword' || kind === 'pixie_wand' ? -0.05 : 0.28;
+    const shaft = addMesh(new CylinderGeometry(0.028, 0.032, shaftLen, 10), primaryMat);
+    shaft.position.y = shaftY;
+    const pommel = addMesh(new OctahedronGeometry(0.058, 0), accentMat);
+    pommel.position.y = shaftY - shaftLen * 0.5 - 0.03;
+  }
+
+  switch (kind) {
+    case 'royal_sword': {
+      const guard = addMesh(new BoxGeometry(0.38, 0.055, 0.08), primaryMat);
+      guard.position.y = 0.16;
+      const guardGem = addMesh(new OctahedronGeometry(0.075, 0), accentMat);
+      guardGem.position.y = 0.16;
+      const blade = addMesh(new ConeGeometry(0.068, 1.05, 4), glowMat);
+      blade.scale.set(1, 1, 0.36);
+      blade.position.y = 0.71;
+      const fuller = addMesh(new ConeGeometry(0.035, 0.85, 4), primaryMat);
+      fuller.scale.set(1, 1, 0.42);
+      fuller.position.y = 0.62;
+      break;
+    }
+    case 'ocean_trident': {
+      const collar = addMesh(new TorusGeometry(0.14, 0.028, 6, 18, Math.PI), primaryMat);
+      collar.position.y = 0.82;
+      collar.rotation.z = Math.PI;
+      const centerProng = addMesh(new ConeGeometry(0.055, 0.52, 6), accentMat);
+      centerProng.position.y = 1.08;
+      for (const side of [-1, 1] as const) {
+        const prong = addMesh(new ConeGeometry(0.042, 0.4, 6), primaryMat);
+        prong.position.set(side * 0.14, 1.0, 0);
+        prong.rotation.z = -side * 0.12;
+      }
+      const pearl = addMesh(new SphereGeometry(0.068, 12, 10), glowMat);
+      pearl.position.y = 0.82;
+      break;
+    }
+    case 'candy_scepter': {
+      const disc = addMesh(new CylinderGeometry(0.24, 0.24, 0.075, 20), primaryMat);
+      disc.rotation.x = Math.PI / 2;
+      disc.position.y = 0.96;
+      const swirl = addMesh(new TorusGeometry(0.15, 0.036, 8, 22), accentMat);
+      swirl.position.set(0, 0.96, 0.038);
+      const swirlB = addMesh(new TorusGeometry(0.15, 0.036, 8, 22), accentMat);
+      swirlB.position.set(0, 0.96, -0.038);
+      const topper = addMesh(new OctahedronGeometry(0.085, 0), glowMat);
+      topper.position.y = 1.26;
+      break;
+    }
+    case 'sakura_staff': {
+      const cradle = addMesh(new TorusGeometry(0.16, 0.026, 6, 20, Math.PI * 1.4), accentMat);
+      cradle.position.y = 0.94;
+      cradle.rotation.z = Math.PI * 0.8;
+      const core = addMesh(new SphereGeometry(0.075, 10, 10), glowMat);
+      core.position.y = 0.96;
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        const petal = addMesh(new ConeGeometry(0.068, 0.2, 6), primaryMat);
+        petal.position.set(Math.cos(a) * 0.12, 0.96 + Math.sin(a) * 0.12, 0);
+        petal.rotation.z = a - Math.PI / 2;
+      }
+      break;
+    }
+    case 'crystal_bow': {
+      const arc = addMesh(new TorusGeometry(0.56, 0.038, 8, 28, Math.PI * 1.16), primaryMat);
+      arc.rotation.z = -Math.PI * 0.58;
+      arc.position.set(0.16, 0.35, 0);
+      const bowString = addMesh(new CylinderGeometry(0.008, 0.008, 1.06, 6), glowMat);
+      bowString.position.set(-0.02, 0.35, 0);
+      const arrowShaft = addMesh(new CylinderGeometry(0.014, 0.014, 0.86, 6), accentMat);
+      arrowShaft.rotation.z = -Math.PI / 2;
+      arrowShaft.position.set(0.24, 0.35, 0);
+      const arrowHead = addMesh(new ConeGeometry(0.062, 0.22, 5), glowMat);
+      arrowHead.rotation.z = -Math.PI / 2;
+      arrowHead.position.set(0.72, 0.35, 0);
+      break;
+    }
+    case 'starlight_wand': {
+      const moon = addMesh(new TorusGeometry(0.19, 0.042, 8, 24, Math.PI * 1.35), accentMat);
+      moon.position.y = 0.98;
+      moon.rotation.z = Math.PI * 0.72;
+      const star = addMesh(new OctahedronGeometry(0.1, 0), glowMat);
+      star.position.set(0.03, 0.98, 0);
+      const orbit = addMesh(new TorusGeometry(0.24, 0.014, 6, 24), primaryMat);
+      orbit.rotation.x = Math.PI / 3;
+      orbit.position.y = 0.98;
+      break;
+    }
+    case 'pixie_wand': {
+      const starA = addMesh(new OctahedronGeometry(0.14, 0), accentMat);
+      starA.position.y = 0.28;
+      const starB = addMesh(new OctahedronGeometry(0.11, 0), glowMat);
+      starB.rotation.y = Math.PI / 4;
+      starB.position.y = 0.28;
+      const halo = addMesh(new TorusGeometry(0.2, 0.018, 6, 24), primaryMat);
+      halo.position.y = 0.28;
+      break;
+    }
+  }
+
+  return { group, geometries, materials };
 }
 
 /**
@@ -444,11 +655,24 @@ export class PrincessFairy3DView {
 
   private activeForm: SnakeForm | null = null;
   private lastStage: GameState['princessStage'] = 'snake';
+  private lastInCastle = false;
+  private lastOutfitKind: ShelterKind | null = null;
+  private lastMakeupKind: ShelterKind | null = null;
+  private lastWeaponKind: ShelterKind | null = null;
+  private readonly royalCrown: ReturnType<typeof buildRoyalCrownMesh>;
+  private readonly weaponHolder = new Group();
+  private heldWeaponAsset: BuiltCosmeticAsset | null = null;
+  private readonly scratchEmissive = new Color();
   private bloomTimer = 0;
   private visible = false;
 
   constructor(private readonly scene: Scene) {
     this.handSparkle = new Mesh(this.sparkleGeo, this.pixieDustMat);
+    this.royalCrown = buildRoyalCrownMesh(0xffd700, 0xff2a55);
+    this.royalCrown.group.position.set(0, 0.235, 0.065);
+    this.royalCrown.group.rotation.x = 0.22;
+    this.royalCrown.group.scale.setScalar(0.76);
+    this.royalCrown.group.visible = false;
     this.buildFairyModel();
 
     this.glowLight = new PointLight(0xffe2a0, 0, 9.5, 1.6);
@@ -684,16 +908,20 @@ export class PrincessFairy3DView {
     buildArm(this.leftArm, this.leftElbow, -1);
     buildArm(this.rightArm, this.rightElbow, 1);
 
-    // Twinkling golden pixie-dust starlight floating just off her right fingertips
+    // Twinkling golden pixie-dust starlight & Signature Royal Weapon socket in her right hand
     this.handSparkle.position.set(0, -0.35, 0.05);
     this.rightElbow.add(this.handSparkle);
+    this.weaponHolder.position.set(0, -0.27, 0.05);
+    this.weaponHolder.rotation.set(0.42, 0.22, -0.34);
+    this.weaponHolder.scale.setScalar(0.82);
+    this.rightElbow.add(this.weaponHolder);
 
     // 5. Adorable Chibi-Pixie Head: big sapphire-aqua eyes, lashes, brows, nose, blush & ears
     this.headPivot.position.set(0, 1.65, 0.015);
     this.headPivot.rotation.order = 'YXZ';
     const head = new Mesh(new SphereGeometry(0.275, 24, 20), this.skinMat);
     head.scale.set(1.02, 1.0, 0.96);
-    this.headPivot.add(head);
+    this.headPivot.add(head, this.royalCrown.group);
 
     // Tiny cute button nose
     const nose = new Mesh(new SphereGeometry(0.021, 10, 8), this.skinMat);
@@ -999,8 +1227,19 @@ export class PrincessFairy3DView {
     const dt = Math.min(Math.max(delta, 0), 0.1);
     const stage = state.princessStage ?? 'snake';
     const gameover = state.phase === 'gameover';
-    const morph = gameover ? 0 : princessMorphFactor(state, alpha);
-    const fxProgress = princessStageProgress(state, alpha);
+    const interior = state.castleInterior;
+    const inCastle = !gameover && interior !== null;
+
+    if (inCastle !== this.lastInCastle) {
+      this.lastInCastle = inCastle;
+      this.hasSmoothPos = false;
+      this.hasYaw = false;
+    }
+
+    this.syncWardrobe(state);
+
+    const morph = gameover ? 0 : inCastle ? 1 : princessMorphFactor(state, alpha);
+    const fxProgress = inCastle ? 0 : princessStageProgress(state, alpha);
 
     // Bloom when the fairy is revealed
     if (stage === 'princess' && this.lastStage === 'transforming') {
@@ -1021,7 +1260,7 @@ export class PrincessFairy3DView {
       this.ribbonMat.emissive.setHex(hex);
     }
 
-    const reveal = smoothstep(0.46, 1, morph);
+    const reveal = inCastle ? 1 : smoothstep(0.46, 1, morph);
     this.visible = reveal > 0.001;
     this.princessGroup.visible = this.visible;
     this.groundGlow.visible = this.visible;
@@ -1055,7 +1294,7 @@ export class PrincessFairy3DView {
 
     // Scenic altitude lift when sweeping behind a toured castle so spires never hide her
     let targetTourClimb = 0;
-    if (stage === 'princess' && state.princessTourShelterId !== null) {
+    if (!inCastle && stage === 'princess' && state.princessTourShelterId !== null) {
       const toured = (state.shelters ?? []).find((s) => s.id === state.princessTourShelterId);
       if (toured) {
         const relZ = (this.smoothPos.z - toured.z) / Math.max(6, toured.radius);
@@ -1065,16 +1304,24 @@ export class PrincessFairy3DView {
     this.smoothTourClimb +=
       (targetTourClimb - this.smoothTourClimb) * (dt > 0 ? 1 - Math.exp(-4.5 * dt) : 1);
 
-    // Multi-harmonic weightless fairy hover
+    // Multi-harmonic weightless fairy hover (cozy palace floor stroll when inside a castle!)
+    const activeScale = inCastle ? PRINCESS_SCALE * 1.48 : PRINCESS_SCALE;
     const hoverBob =
       (Math.sin(elapsed * 2.3) * 0.13 + Math.sin(elapsed * 3.9 + 0.8) * 0.035) * reveal;
-    const baseY = PRINCESS_BASE_Y + morph * PRINCESS_LIFT + this.smoothTourClimb + hoverBob;
-    this.princessWorldPos.set(this.smoothPos.x, baseY + 1.1 * PRINCESS_SCALE, this.smoothPos.z);
-    this.headTopWorldY = baseY + PRINCESS_MODEL_HEIGHT * PRINCESS_SCALE;
+    const baseY = inCastle
+      ? 0.42 + hoverBob * 0.55
+      : PRINCESS_BASE_Y + morph * PRINCESS_LIFT + this.smoothTourClimb + hoverBob;
+    this.princessWorldPos.set(this.smoothPos.x, baseY + 1.1 * activeScale, this.smoothPos.z);
+    this.headTopWorldY = baseY + PRINCESS_MODEL_HEIGHT * activeScale;
 
     if (this.visible) {
-      // Critically-damped 2nd-order angular spring on heading: zero 20Hz stepping or overshoot
-      const targetYaw = Math.atan2(Math.cos(state.heading), Math.sin(state.heading));
+      // Critically-damped 2nd-order angular spring on heading: zero 20Hz stepping or overshoot.
+      // When standing still inside a palace boutique, she poses gracefully toward the camera!
+      const posingForBoutique = inCastle && interior !== null && interior.targetHeading === null;
+      const activeHeading = inCastle && interior ? interior.heading : state.heading;
+      const targetYaw = posingForBoutique
+        ? Math.sin(elapsed * 0.75) * 0.28
+        : Math.atan2(Math.cos(activeHeading), Math.sin(activeHeading));
       if (!this.hasYaw) {
         this.currentYaw = targetYaw;
         this.yawVel = 0;
@@ -1098,16 +1345,18 @@ export class PrincessFairy3DView {
       const headTurn = this.smoothLookSide * 0.42 + clamp(this.yawVel * 0.045, -0.18, 0.18);
 
       const spin = (1 - reveal) * Math.PI * 3.2;
-      const scale = PRINCESS_SCALE * Math.max(0.001, easeOutBack(reveal));
+      const scale = activeScale * Math.max(0.001, easeOutBack(reveal));
 
       this.princessGroup.position.set(this.smoothPos.x, baseY, this.smoothPos.z);
       this.princessGroup.rotation.y = this.currentYaw + bodyTurn + spin;
       this.princessGroup.scale.setScalar(scale);
 
-      // Smooth bank roll & graceful forward fairy glide pitch
+      // Smooth bank roll & graceful forward fairy glide pitch (upright royal posture inside palace)
       const speedNorm = clamp01(this.smoothSpeed / 9.5);
       const targetBank = clamp(-this.yawVel * 0.082, -0.32, 0.32);
-      const targetPitch = 0.16 + speedNorm * 0.14 + Math.sin(elapsed * 2.3 + 0.6) * 0.035;
+      const targetPitch = inCastle
+        ? 0.03 + speedNorm * 0.11 + Math.sin(elapsed * 2.1 + 0.6) * 0.02
+        : 0.16 + speedNorm * 0.14 + Math.sin(elapsed * 2.3 + 0.6) * 0.035;
       const poseBlend = dt > 0 ? 1 - Math.exp(-8.5 * dt) : 1;
       this.smoothBank += (targetBank - this.smoothBank) * poseBlend;
       this.smoothPitch += (targetPitch - this.smoothPitch) * poseBlend;
@@ -1233,7 +1482,9 @@ export class PrincessFairy3DView {
 
     // --- Transformation FX ---
     const fxActive =
-      !gameover && (stage === 'transforming' || stage === 'returning' || this.bloomTimer > 0);
+      !gameover &&
+      !inCastle &&
+      (stage === 'transforming' || stage === 'returning' || this.bloomTimer > 0);
     this.fxGroup.visible = fxActive;
     if (!fxActive) return;
 
@@ -1322,8 +1573,91 @@ export class PrincessFairy3DView {
     }
   }
 
+  private syncWardrobe(state: GameState): void {
+    const wardrobe = state.wardrobe;
+    const outfitKind = wardrobe?.equippedOutfit ?? null;
+    const makeupKind = wardrobe?.equippedMakeup ?? null;
+    const weaponKind = wardrobe?.equippedWeapon ?? null;
+
+    if (outfitKind !== this.lastOutfitKind) {
+      this.lastOutfitKind = outfitKind;
+      if (outfitKind) {
+        const set = CASTLE_ROYAL_SETS[outfitKind];
+        this.leafLightMat.color.setHex(set.gownPrimaryHex);
+        this.scratchEmissive.setHex(set.gownPrimaryHex).multiplyScalar(0.55);
+        this.leafLightMat.emissive.copy(this.scratchEmissive);
+        this.leafDeepMat.color.setHex(set.gownSecondaryHex);
+        this.scratchEmissive.setHex(set.gownSecondaryHex).multiplyScalar(0.5);
+        this.leafDeepMat.emissive.copy(this.scratchEmissive);
+        this.leafGoldMat.color.setHex(set.gownGoldHex);
+        this.leafGoldMat.emissive.setHex(set.gownGoldHex);
+      } else {
+        this.leafLightMat.color.setHex(LEAF_BRIGHT);
+        this.leafLightMat.emissive.setHex(0x3eb835);
+        this.leafDeepMat.color.setHex(LEAF_EMERALD);
+        this.leafDeepMat.emissive.setHex(0x1b7d32);
+        this.leafGoldMat.color.setHex(LEAF_TIP_GOLD);
+        this.leafGoldMat.emissive.setHex(0xffd24c);
+      }
+    }
+
+    if (makeupKind !== this.lastMakeupKind) {
+      this.lastMakeupKind = makeupKind;
+      if (makeupKind) {
+        const set = CASTLE_ROYAL_SETS[makeupKind];
+        this.hairMat.color.setHex(set.hairHex);
+        this.scratchEmissive.setHex(set.hairHex).multiplyScalar(0.65);
+        this.hairMat.emissive.copy(this.scratchEmissive);
+        this.hairHighlightMat.color.setHex(set.hairHighlightHex);
+        this.hairHighlightMat.emissive.setHex(set.hairHighlightHex);
+        this.irisDeepMat.color.setHex(set.irisHex);
+        this.blushMat.color.setHex(set.blushHex);
+        this.smileMat.color.setHex(set.lipHex);
+        this.royalCrown.crownMat.color.setHex(set.crownHex);
+        this.royalCrown.crownMat.emissive.setHex(set.crownHex);
+        this.royalCrown.gemMat.color.setHex(set.crownGemHex);
+        this.royalCrown.gemMat.emissive.setHex(set.crownGemHex);
+        this.royalCrown.group.visible = true;
+      } else {
+        this.hairMat.color.setHex(HAIR_HONEY);
+        this.hairMat.emissive.setHex(0xffb72b);
+        this.hairHighlightMat.color.setHex(HAIR_HIGHLIGHT);
+        this.hairHighlightMat.emissive.setHex(0xffd45e);
+        this.irisDeepMat.color.setHex(0x1e78ff);
+        this.blushMat.color.setHex(0xff82b2);
+        this.smileMat.color.setHex(0xe64978);
+        this.royalCrown.group.visible = false;
+      }
+    }
+
+    if (weaponKind !== this.lastWeaponKind) {
+      this.lastWeaponKind = weaponKind;
+      this.clearHeldWeapon();
+      if (weaponKind) {
+        const set = CASTLE_ROYAL_SETS[weaponKind];
+        this.heldWeaponAsset = buildSignatureWeaponMesh(
+          set.weaponKind,
+          set.weaponPrimaryHex,
+          set.weaponAccentHex,
+        );
+        this.weaponHolder.add(this.heldWeaponAsset.group);
+      }
+    }
+  }
+
+  private clearHeldWeapon(): void {
+    if (!this.heldWeaponAsset) return;
+    this.weaponHolder.remove(this.heldWeaponAsset.group);
+    for (const g of this.heldWeaponAsset.geometries) g.dispose();
+    for (const m of this.heldWeaponAsset.materials) m.dispose();
+    this.heldWeaponAsset = null;
+  }
+
   /** Remove the view and free every GPU resource. */
   dispose(): void {
+    this.clearHeldWeapon();
+    for (const g of this.royalCrown.geometries) g.dispose();
+    for (const m of this.royalCrown.materials) m.dispose();
     this.scene.remove(this.root);
     const geos = new Set<BufferGeometry>();
     const mats = new Set<Material>();

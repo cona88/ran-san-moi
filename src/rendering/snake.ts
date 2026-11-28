@@ -23,9 +23,10 @@ import {
   type Scene,
 } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { CASTLE_ROYAL_SETS } from '../core/castleInterior';
 import { FORM_METADATA } from '../core/config';
 import { angleDiff, clamp } from '../core/systems/arena';
-import type { GamePhase, GameState, SnakeForm, Vec2 } from '../core/types';
+import type { GamePhase, GameState, ShelterKind, SnakeForm, Vec2 } from '../core/types';
 import type { BadgeTextureCache, CrownResources } from './labels3d';
 import { princessHeadHeight, princessMorphFactor } from './princess3d';
 import { cellToWorld } from './world';
@@ -558,6 +559,7 @@ export class SnakeView {
   private lastPrevSnakeRef: readonly Vec2[] | null = null;
   private lastPhase: GamePhase | null = null;
   private lastLevel = -1;
+  private lastMakeupKind: ShelterKind | null = null;
 
   private chompAnimTimer = 0;
   private chompAuraTimer = 0;
@@ -815,6 +817,34 @@ export class SnakeView {
     const dt = Math.min(Math.max(delta, 0), 0.1);
     const a = Math.max(0, Math.min(1, alpha));
     const gameover = state.phase === 'gameover';
+
+    // Sync Royal Wardrobe tiara colors when makeup/crown slot changes
+    const makeupKind = state.wardrobe?.equippedMakeup ?? null;
+    if (makeupKind !== this.lastMakeupKind) {
+      this.lastMakeupKind = makeupKind;
+      if (makeupKind) {
+        const set = CASTLE_ROYAL_SETS[makeupKind];
+        this.tiaraGoldMat.color.setHex(set.crownHex);
+        this.tiaraGoldMat.emissive.setHex(set.crownHex);
+        this.tiaraPinkGemMat.color.setHex(set.crownGemHex);
+        this.tiaraPinkGemMat.emissive.setHex(set.crownGemHex);
+      } else {
+        this.tiaraGoldMat.color.setHex(0xffe45c);
+        this.tiaraGoldMat.emissive.setHex(0xffb82e);
+        this.tiaraPinkGemMat.color.setHex(0xff80d0);
+        this.tiaraPinkGemMat.emissive.setHex(0xff49b8);
+      }
+    }
+
+    // Inside a Castle Interior, the Fairy avatar strolls solo; hide snake meshes while keeping nameplate
+    if (state.castleInterior !== null) {
+      this.headGroup.visible = false;
+      this.crownGroup.visible = false;
+      this.groundShadowGroup.visible = false;
+      for (const seg of this.segments) seg.mesh.visible = false;
+      this.nameSprite.visible = !gameover;
+      return;
+    }
 
     const targetThickness = computeThicknessScale(state.level);
     this.currentThickness += (targetThickness - this.currentThickness) * Math.min(1, dt * 8);
