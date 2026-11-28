@@ -186,6 +186,18 @@ export function attachKeyboard(handlers: ControlHandlers): () => void {
       return;
     }
 
+    if (code === 'KeyO') {
+      event.preventDefault();
+      if (!event.repeat) handlers.toggleVista?.();
+      return;
+    }
+
+    if (code === 'KeyR') {
+      event.preventDefault();
+      if (!event.repeat) handlers.toggleCastleInterior?.();
+      return;
+    }
+
     const booster = KEY_TO_BOOSTER[code];
     if (booster) {
       event.preventDefault();

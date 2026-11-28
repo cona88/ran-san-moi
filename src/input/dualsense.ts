@@ -124,6 +124,18 @@ const RUMBLE_PRESETS: Readonly<Partial<Record<GameEventKind, RumbleSpec>>> = {
   princess_reveal: { duration: 240, weakMagnitude: 0.7, strongMagnitude: 0.35 },
   princess_return: { duration: 140, weakMagnitude: 0.35, strongMagnitude: 0.12 },
   princess_tour_lap: { duration: 110, weakMagnitude: 0.45, strongMagnitude: 0.2 },
+  region_discovered: { duration: 120, weakMagnitude: 0.48, strongMagnitude: 0.2 },
+  landmark_discovered: { duration: 240, weakMagnitude: 0.82, strongMagnitude: 0.58 },
+  chapter_complete: { duration: 310, weakMagnitude: 0.92, strongMagnitude: 0.72 },
+  castle_enter_interior: { duration: 180, weakMagnitude: 0.65, strongMagnitude: 0.36 },
+  castle_exit_interior: { duration: 120, weakMagnitude: 0.42, strongMagnitude: 0.18 },
+  castle_item_equipped: { duration: 95, weakMagnitude: 0.52, strongMagnitude: 0.22 },
+};
+
+const CASTLE_CHORD_RUMBLE: RumbleSpec = {
+  duration: 85,
+  weakMagnitude: 0.58,
+  strongMagnitude: 0.24,
 };
 
 const CHOMP_RUMBLE_DURATION_MS = 38;
@@ -229,6 +241,12 @@ const LIGHTBAR_EVENT_FLASHES: Readonly<Partial<Record<GameEventKind, LightbarFla
   princess_tour_lap: { rgb: [255, 228, 120], durationMs: 360 },
   player_hit_by_magic: { rgb: [255, 24, 24], durationMs: 420 },
   bot_spell_cast: { rgb: [255, 150, 30], durationMs: 150 },
+  region_discovered: { rgb: PIXIE_LEAF_MINT_RGB, durationMs: 380 },
+  landmark_discovered: { rgb: PIXIE_GOLD_RGB, durationMs: 580 },
+  chapter_complete: { rgb: [255, 214, 64], durationMs: 780 },
+  castle_enter_interior: { rgb: PIXIE_GOLD_RGB, durationMs: 480 },
+  castle_exit_interior: { rgb: BUTTERFLY_ICE_CYAN_RGB, durationMs: 320 },
+  castle_item_equipped: { rgb: PIXIE_ROSE_RGB, durationMs: 360 },
 };
 
 const LIGHTBAR_EVENT_COLORS: Readonly<Partial<Record<GameEventKind, RgbColor>>> = {
@@ -550,6 +568,25 @@ export class DualSenseManager {
     }
 
     if (state.phase === 'playing') {
+      const l1PadChord =
+        this.isPressed(BTN_L1) &&
+        this.isPressed(BTN_TOUCHPAD) &&
+        !this.isPressed(BTN_R1) &&
+        !l2HeldDuringPlay &&
+        (this.justPressed(BTN_L1) || this.justPressed(BTN_TOUCHPAD)) &&
+        !this.princessChordLatched;
+
+      if (l1PadChord) {
+        this.princessChordLatched = true;
+        suppressL1Thunder = true;
+        suppressTouchpadAoe = true;
+        this.handlers.toggleCastleInterior?.();
+        this.triggerPracticeRumble(CASTLE_CHORD_RUMBLE, 16, now);
+        if (this.isWebHidConnected()) {
+          this.triggerLightbarFlash(PIXIE_GOLD_RGB, 360, 2, now);
+        }
+      }
+
       const l1R1Chord =
         this.isPressed(BTN_L1) &&
         this.isPressed(BTN_R1) &&
@@ -560,6 +597,7 @@ export class DualSenseManager {
         l2HeldDuringPlay && this.justPressed(BTN_TOUCHPAD) && !this.princessChordLatched;
       const padReturnWhilePrincess =
         !l2HeldDuringPlay &&
+        !this.isPressed(BTN_L1) &&
         state.princessStage === 'princess' &&
         this.justPressed(BTN_TOUCHPAD) &&
         !this.princessChordLatched;
@@ -693,9 +731,13 @@ export class DualSenseManager {
       }
     }
 
-    // 6b. Bubble Shield (Circle, suppressed when L2 + Circle casts AoE)
+    // 6b. Bubble Shield (Circle, or Exit Castle when inside a Palace Interior; suppressed when L2 + Circle casts AoE)
     if (!suppressCircleNormal && this.justPressed(BTN_CIRCLE)) {
-      this.handlers.shield();
+      if (state.castleInterior !== null) {
+        this.handlers.toggleCastleInterior?.();
+      } else {
+        this.handlers.shield();
+      }
     }
 
     // 7. Three Magical Boosters (L3 -> +10 Level, Create/Share -> Speed, R3 -> Magnet)

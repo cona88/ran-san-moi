@@ -304,6 +304,24 @@ export class Sfx {
       case 'player_hit_by_magic':
         this.playPlayerHitByMagic(event.spell ?? 'bolt', baseOffset);
         return;
+      case 'region_discovered':
+        this.playRegionDiscovered(baseOffset);
+        return;
+      case 'landmark_discovered':
+        this.playLandmarkDiscovered(baseOffset);
+        return;
+      case 'chapter_complete':
+        this.playChapterComplete(baseOffset);
+        return;
+      case 'castle_enter_interior':
+        this.playCastleEnterInterior(baseOffset);
+        return;
+      case 'castle_exit_interior':
+        this.playCastleExitInterior(baseOffset);
+        return;
+      case 'castle_item_equipped':
+        this.playCastleItemEquipped(baseOffset);
+        return;
       default: {
         const exhaustive: never = kind;
         return exhaustive;
@@ -1172,6 +1190,207 @@ export class Sfx {
     ]);
   }
 
+  /** Royal palace chime + warm cascading harp glissando when stepping inside a Luxury Castle Interior. */
+  playCastleEnterInterior(offset = 0): void {
+    this.scheduleNoiseBurst(offset, 0.34, 2400, 7600, 0.045, 'highpass', 0.012, 1.25, 0.48, 0);
+    const pad = [196.0, 293.66, 392.0];
+    const harp = [523.25, 659.25, 783.99, 987.77, 1174.66, 1567.98];
+    this.scheduleTones(offset, [
+      ...pad.map((hz, i) => ({
+        delay: i * 0.02,
+        startHz: hz,
+        duration: 0.72,
+        attack: 0.06,
+        gain: 0.11,
+        type: 'triangle' as const,
+        filterHz: 1100 + i * 320,
+        endFilterHz: 2400,
+        pan: (i % 2 === 0 ? -1 : 1) * 0.22,
+        shimmer: 0.36,
+      })),
+      ...harp.map((hz, i) => ({
+        delay: 0.03 + i * 0.044,
+        startHz: hz,
+        duration: i >= harp.length - 2 ? 0.68 : 0.36,
+        attack: 0.004,
+        gain: 0.125,
+        type: 'sine' as const,
+        overtoneRatio: 2,
+        overtoneGain: 0.22,
+        pan: -0.28 + (i / (harp.length - 1)) * 0.56,
+        shimmer: 0.5,
+      })),
+    ]);
+  }
+
+  /** Gentle descending portal shimmer when exiting a Castle Interior back to the Kingdom. */
+  playCastleExitInterior(offset = 0): void {
+    this.scheduleNoiseBurst(offset, 0.22, 4600, 1800, 0.036, 'bandpass', 0.01, 1.3, 0.4, 0);
+    const notes = [1174.66, 987.77, 783.99, 659.25, 523.25];
+    this.scheduleTones(offset, [
+      ...notes.map((hz, i) => ({
+        delay: i * 0.04,
+        startHz: hz,
+        duration: i === notes.length - 1 ? 0.44 : 0.26,
+        attack: 0.004,
+        gain: 0.1,
+        type: 'sine' as const,
+        overtoneRatio: 2,
+        overtoneGain: 0.15,
+        pan: (i % 2 === 0 ? 1 : -1) * 0.2,
+        shimmer: 0.42,
+      })),
+    ]);
+  }
+
+  /** Sparkling royal dress-up celesta bell arpeggio when equipping a gown, crown/makeup, or signature weapon. */
+  playCastleItemEquipped(offset = 0): void {
+    this.scheduleNoiseBurst(offset, 0.2, 3400, 8800, 0.038, 'highpass', 0.006, 1.35, 0.46, 0);
+    const bells = [659.25, 783.99, 987.77, 1318.51, 1567.98, 2093.0];
+    this.scheduleTones(offset, [
+      ...bells.map((hz, i) => ({
+        delay: i * 0.036,
+        startHz: hz,
+        duration: i >= bells.length - 2 ? 0.52 : 0.28,
+        attack: 0.003,
+        gain: 0.115,
+        type: 'sine' as const,
+        overtoneRatio: 2,
+        overtoneGain: 0.24,
+        pan: (i % 2 === 0 ? -1 : 1) * 0.24,
+        shimmer: 0.52,
+      })),
+    ]);
+  }
+
+  /** Warm shimmering harp & chime flourish when entering an unvisited kingdom region. */
+  playRegionDiscovered(offset = 0): void {
+    this.scheduleNoiseBurst(offset, 0.24, 2400, 6200, 0.036, 'highpass', 0.012, 1.2, 0.4, 0);
+    const notes = [392.0, 493.88, 587.33, 739.99, 987.77, 1174.66];
+    this.scheduleTones(offset, [
+      {
+        delay: 0,
+        startHz: 196.0,
+        duration: 0.36,
+        attack: 0.014,
+        gain: 0.11,
+        type: 'sine',
+        shimmer: 0.2,
+      },
+      ...notes.map((hz, i) => ({
+        delay: i * 0.048,
+        startHz: hz,
+        duration: i === notes.length - 1 ? 0.52 : 0.3,
+        attack: 0.004,
+        gain: 0.11,
+        type: 'sine' as const,
+        overtoneRatio: 2,
+        overtoneGain: 0.18,
+        pan: (i % 2 === 0 ? -1 : 1) * 0.2,
+        shimmer: 0.42,
+      })),
+    ]);
+  }
+
+  /** Grand orchestral swell + cascading crystalline harp glissando when discovering one of the 6 Colossal Wonders. */
+  playLandmarkDiscovered(offset = 0): void {
+    this.scheduleNoiseBurst(offset, 0.42, 2600, 8800, 0.052, 'highpass', 0.012, 1.3, 0.5, 0);
+    const padChord = [130.81, 196.0, 261.63, 392.0, 523.25]; // C3-G3-C4-G4-C5 warm fifth/octave orchestral swell
+    const harpGliss = [523.25, 659.25, 783.99, 987.77, 1046.5, 1318.51, 1567.98, 1975.53, 2093.0];
+    this.scheduleTones(offset, [
+      // Warm layered fifth/octave orchestral pad swell
+      ...padChord.map((hz, i) => ({
+        delay: i * 0.016,
+        startHz: hz,
+        duration: 0.92,
+        attack: 0.09,
+        gain: i < 2 ? 0.135 : 0.09,
+        type: 'triangle' as const,
+        filterHz: 780 + i * 240,
+        endFilterHz: 2100 + i * 320,
+        detuneCents: (i % 2 === 0 ? -1 : 1) * 5,
+        pan: (i % 2 === 0 ? -1 : 1) * 0.28,
+        shimmer: 0.36,
+      })),
+      // Shimmering cascading crystalline harp glissando
+      ...harpGliss.map((hz, i) => ({
+        delay: 0.03 + i * 0.04,
+        startHz: hz,
+        duration: i >= harpGliss.length - 2 ? 0.8 : 0.42,
+        attack: 0.004,
+        gain: 0.12,
+        type: 'sine' as const,
+        overtoneRatio: 2,
+        overtoneGain: 0.24,
+        pan: -0.35 + (i / (harpGliss.length - 1)) * 0.7,
+        shimmer: 0.52,
+      })),
+      // Radiant upper-fifth bell resonance at apex
+      {
+        delay: 0.03 + harpGliss.length * 0.04,
+        startHz: 1567.98,
+        duration: 0.78,
+        attack: 0.005,
+        gain: 0.13,
+        type: 'sine',
+        overtoneRatio: 1.5,
+        overtoneGain: 0.2,
+        shimmer: 0.56,
+      },
+    ]);
+  }
+
+  /** Grand royal orchestral fifth/octave swell + heraldic brass cadence + cascading celesta harp glissando on completing an Adventure Chapter. */
+  playChapterComplete(offset = 0): void {
+    this.scheduleNoiseBurst(offset, 0.52, 3000, 9600, 0.056, 'highpass', 0.014, 1.25, 0.55, 0);
+    const padSwell = [130.81, 196.0, 261.63, 392.0, 523.25, 783.99]; // Layered C/G fifth+octave grand pad
+    const herald = [523.25, 659.25, 783.99, 1046.5];
+    const crownGliss = [1046.5, 1318.51, 1567.98, 1975.53, 2093.0, 2637.02, 3135.96];
+    this.scheduleTones(offset, [
+      // Rich orchestral fifth/octave harmonic swell
+      ...padSwell.map((hz, i) => ({
+        delay: i * 0.018,
+        startHz: hz,
+        duration: 1.15,
+        attack: 0.11,
+        gain: i < 2 ? 0.14 : 0.085,
+        type: 'triangle' as const,
+        filterHz: 850 + i * 260,
+        endFilterHz: 2600 + i * 360,
+        detuneCents: (i % 2 === 0 ? -1 : 1) * 6,
+        pan: (i % 2 === 0 ? -1 : 1) * 0.34,
+        shimmer: 0.4,
+      })),
+      // Triumphant heraldic brass/horn phrase
+      ...herald.map((hz, i) => ({
+        delay: 0.06 + i * 0.075,
+        startHz: hz,
+        duration: i === herald.length - 1 ? 0.92 : 0.45,
+        attack: 0.008,
+        gain: 0.14,
+        type: 'triangle' as const,
+        filterHz: 3200,
+        overtoneRatio: 2,
+        overtoneGain: 0.22,
+        pan: (i % 2 === 0 ? -1 : 1) * 0.22,
+        shimmer: 0.48,
+      })),
+      // Shimmering cascading crystalline harp & celesta crown glissando
+      ...crownGliss.map((hz, i) => ({
+        delay: 0.26 + i * 0.036,
+        startHz: hz,
+        duration: i >= crownGliss.length - 2 ? 0.88 : 0.44,
+        attack: 0.004,
+        gain: 0.105,
+        type: 'sine' as const,
+        overtoneRatio: 2,
+        overtoneGain: 0.18,
+        pan: -0.38 + (i / (crownGliss.length - 1)) * 0.76,
+        shimmer: 0.58,
+      })),
+    ]);
+  }
+
   /** Dreamy ascending fairy harp & celesta arpeggio when a Guardian Fairy visits. */
   playFairyVisitStart(offset = 0): void {
     this.scheduleNoiseBurst(offset, 0.28, 2800, 6800, 0.042, 'highpass', 0.012, 1.3, 0.45, 0);
@@ -1783,13 +2002,20 @@ export class Sfx {
       offset = Math.min(0.11, prev + 0.045 - now);
     }
 
-    if (kind === 'quest_complete' || kind === 'bot_eaten' || kind === 'booster_activate') {
+    if (
+      kind === 'quest_complete' ||
+      kind === 'bot_eaten' ||
+      kind === 'booster_activate' ||
+      kind === 'shelter_discovered' ||
+      kind === 'landmark_discovered' ||
+      kind === 'castle_enter_interior'
+    ) {
       this.lastFanfareAt = Math.max(this.lastFanfareAt, now + offset);
-    } else if (kind === 'boss_defeated') {
+    } else if (kind === 'boss_defeated' || kind === 'chapter_complete') {
       if (now - this.lastFanfareAt < 0.25) {
         offset = Math.max(offset, this.lastFanfareAt + 0.24 - now);
       }
-      // Reserve space for the 5-note victory phrase before follow-up level_up chime
+      // Reserve space for the victory / royal chapter fanfare before follow-up level_up chime
       this.lastFanfareAt = Math.max(this.lastFanfareAt, now + offset + 0.22);
     } else if (
       (kind === 'level_up' || kind === 'heart_gained') &&

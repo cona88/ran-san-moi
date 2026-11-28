@@ -30,6 +30,10 @@ export interface ControlHandlers {
   setButterflyHold(active: boolean): void;
   /** Transform into the flying Fairy Princess (or return to snake form). */
   togglePrincess(): void;
+  /** Toggle Cinematic Panoramic Vista camera angle (KeyO / HUD 🔭 button). */
+  toggleVista?(): void;
+  /** Enter the current shelter palace interior, or exit back to the open kingdom (KeyR / L1+Pad). */
+  toggleCastleInterior?(): void;
   /** Smooth 3D camera look offset (-1..1 on X/Y from Right Stick). */
   cameraLook(nx: number, ny: number): void;
 }

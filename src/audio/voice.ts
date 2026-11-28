@@ -10,6 +10,11 @@ import type { BrainQuest, GameEvent, GameState } from '../core/types';
 export class VoiceHelper {
   private enabled = true;
   private lastDodgeHintMs = -Infinity;
+  private lastRegionVoiceMs = -Infinity;
+  private lastLandmarkVoiceMs = -Infinity;
+  private lastChapterVoiceMs = -Infinity;
+  private lastCastleVoiceMs = -Infinity;
+  private lastDressUpVoiceMs = -Infinity;
 
   /** Feature-check: is speech synthesis available at all? */
   private get supported(): boolean {
@@ -96,6 +101,57 @@ export class VoiceHelper {
       case 'shelter_discovered':
         this.speak('Khám phá lâu đài tuyệt đẹp!');
         break;
+      case 'region_discovered': {
+        const nowMs = Date.now();
+        if (nowMs - this.lastRegionVoiceMs > 7500 && nowMs - this.lastChapterVoiceMs > 3000) {
+          this.lastRegionVoiceMs = nowMs;
+          this.speak('Khám phá vùng đất mới! Đẹp quá!');
+        }
+        break;
+      }
+      case 'landmark_discovered': {
+        const nowMs = Date.now();
+        if (nowMs - this.lastLandmarkVoiceMs > 3500 && nowMs - this.lastChapterVoiceMs > 2500) {
+          this.lastLandmarkVoiceMs = nowMs;
+          this.speak('Tuyệt vời! Khám phá kỳ quan khổng lồ!');
+        }
+        break;
+      }
+      case 'chapter_complete': {
+        const nowMs = Date.now();
+        if (nowMs - this.lastChapterVoiceMs > 2000) {
+          this.lastChapterVoiceMs = nowMs;
+          this.lastLandmarkVoiceMs = nowMs;
+          this.lastRegionVoiceMs = nowMs;
+          const ch = event.chapter ?? state.adventureChapter ?? 1;
+          this.speak(`Hoan hô! Hoàn thành chương ${ch} phiêu lưu!`);
+        }
+        break;
+      }
+      case 'castle_enter_interior': {
+        const nowMs = Date.now();
+        if (nowMs - this.lastCastleVoiceMs > 3000) {
+          this.lastCastleVoiceMs = nowMs;
+          this.speak('Chào mừng bé vào đại sảnh lâu đài hoàng gia!');
+        }
+        break;
+      }
+      case 'castle_exit_interior': {
+        const nowMs = Date.now();
+        if (nowMs - this.lastCastleVoiceMs > 3000) {
+          this.lastCastleVoiceMs = nowMs;
+          this.speak('Tiếp tục phiêu lưu vương quốc nào!');
+        }
+        break;
+      }
+      case 'castle_item_equipped': {
+        const nowMs = Date.now();
+        if (nowMs - this.lastDressUpVoiceMs > 2400) {
+          this.lastDressUpVoiceMs = nowMs;
+          this.speak('Xinh lung linh quá!');
+        }
+        break;
+      }
       case 'princess_reveal':
         this.speak('Biến hình! Tiên nữ xinh đẹp!');
         break;

@@ -5,6 +5,7 @@ import type {
   BoosterKind,
   BotSnake,
   BrainQuest,
+  CastleCosmeticSlot,
   Difficulty,
   FairySkillKind,
   GameAction,
@@ -14,6 +15,7 @@ import type {
   GuardianFairyState,
   Hazard,
   QuestKind,
+  ShelterKind,
   SnakeForm,
   Vec2,
   VisualTheme,
@@ -23,6 +25,7 @@ import {
   clamp,
   computeLeaderboard,
   createInitialState,
+  DEFAULT_LANDMARKS,
   euclideanDistance,
   normalizeAngle,
   powerFormForSkin,
@@ -82,6 +85,9 @@ export interface SnakeGameTestHook {
   } | null;
   readonly spawnQuestForTest: (kind?: QuestKind) => BrainQuest | null;
   readonly spawnGuardianFairyForTest?: (kind?: GuardianFairyKind) => GuardianFairyState | null;
+  readonly teleportToLandmarkForTest?: (landmarkId?: string) => boolean;
+  readonly setPanoramicForTest?: (enabled: boolean) => void;
+  readonly enterCastleForTest?: (shelterId?: string) => boolean;
 }
 
 declare global {
@@ -313,9 +319,37 @@ function bootstrap(): void {
       dispatch({ type: 'toggle_princess' });
       ui.flashControlFeedback('princess');
     },
+    toggleVista() {
+      sound.unlock();
+      togglePanoramicVista();
+    },
+    toggleCastleInterior() {
+      sound.unlock();
+      if (state.phase !== 'playing') return;
+      if (state.castleInterior !== null) {
+        dispatch({ type: 'exit_castle' });
+      } else if (state.inShelter) {
+        dispatch({ type: 'enter_castle' });
+      }
+    },
     cameraLook(nx: number, ny: number) {
       renderer.setCameraLook(nx, ny);
     },
+  };
+
+  const togglePanoramicVista = (): boolean => {
+    const active = renderer.togglePanoramicMode();
+    ui.setPanoramicActive(active);
+    if (active) {
+      ui.showToast(
+        '🔭 Toàn Cảnh Điện Ảnh!',
+        'Mở rộng tầm nhìn chiêm ngưỡng Vương Quốc & Kỳ Quan ✨',
+        '🔭',
+      );
+    } else {
+      ui.showToast('🎮 Góc Nhìn Chiến Đấu', 'Quay về góc nhìn săn Bot linh hoạt!', '🎮');
+    }
+    return active;
   };
 
   const dualsense = new DualSenseManager(controls);
@@ -398,6 +432,28 @@ function bootstrap(): void {
     onTogglePrincess() {
       controls.togglePrincess();
     },
+    onToggleVista() {
+      sound.unlock();
+      return togglePanoramicVista();
+    },
+    onEnterCastle() {
+      sound.unlock();
+      if (state.phase === 'playing' && state.castleInterior === null && state.inShelter) {
+        dispatch({ type: 'enter_castle' });
+      }
+    },
+    onExitCastle() {
+      sound.unlock();
+      if (state.phase === 'playing' && state.castleInterior !== null) {
+        dispatch({ type: 'exit_castle' });
+      }
+    },
+    onEquipCastleItem(slot: CastleCosmeticSlot, kind: ShelterKind | null) {
+      sound.unlock();
+      if (state.phase === 'playing') {
+        dispatch({ type: 'equip_castle_item', slot, kind });
+      }
+    },
   };
 
   const ui = new GameUI(uiRoot, uiCallbacks, currentSettings);
@@ -464,7 +520,11 @@ function bootstrap(): void {
       next.config !== prev.config ||
       next.butterflyStage !== prev.butterflyStage ||
       next.princessStage !== prev.princessStage ||
-      next.sprayActiveTicks !== prev.sprayActiveTicks;
+      next.sprayActiveTicks !== prev.sprayActiveTicks ||
+      next.discoveredLandmarkIds !== prev.discoveredLandmarkIds ||
+      next.discoveredShelterIds !== prev.discoveredShelterIds ||
+      next.castleInterior !== prev.castleInterior ||
+      next.wardrobe !== prev.wardrobe;
 
     if (needsFullSync) {
       renderer.sync(next);
@@ -698,12 +758,84 @@ function bootstrap(): void {
     return state.guardianFairy;
   }
 
+  function teleportToLandmarkForTest(landmarkId = 'landmark-world-tree'): boolean {
+    if (state.phase !== 'playing') return false;
+    const landmarks = state.landmarks ?? DEFAULT_LANDMARKS;
+    const lm = landmarks.find((item) => item.id === landmarkId);
+    if (!lm) return false;
+
+    const targetPos: Vec2 = { x: lm.x, z: lm.z };
+    const heading = normalizeAngle(state.heading);
+    const segCount = Math.max(3, state.snake.length);
+    const nextSnake = buildStraightSpine(targetPos, heading, segCount);
+    const nextPrevSnake = nextSnake.map((p) => ({ ...p }));
+
+    const safeBots = state.bots.filter(
+      (b) =>
+        euclideanDistance(b.head, targetPos) >= 18 &&
+        b.spine.every((seg) => euclideanDistance(seg, targetPos) >= 15),
+    );
+    const activeBossId =
+      state.activeBossId !== null && safeBots.some((b) => b.id === state.activeBossId)
+        ? state.activeBossId
+        : null;
+    const board = computeLeaderboard({
+      playerName: state.playerName,
+      playerLevel: state.level,
+      bots: safeBots,
+      activeBossId,
+    });
+
+    state = {
+      ...state,
+      snake: nextSnake,
+      prevSnake: nextPrevSnake,
+      inShelter: false,
+      currentShelterId: null,
+      bots: safeBots,
+      activeBossId,
+      hazards: state.hazards.filter((h) => euclideanDistance(h.cell, targetPos) >= 15),
+      hostileProjectiles: state.hostileProjectiles.filter(
+        (p) => Math.hypot(p.x - targetPos.x, p.z - targetPos.z) >= 15,
+      ),
+      leaderboard: board.leaderboard,
+      playerRank: board.playerRank,
+      crownTarget: board.crownTarget,
+      config: {
+        ...state.config,
+        botCount: Math.max(1, safeBots.length),
+      },
+    };
+
+    dispatch({ type: 'tick' });
+    renderer.sync(state);
+    ui.syncState(state);
+    return true;
+  }
+
+  function setPanoramicForTest(enabled: boolean): void {
+    renderer.setPanoramicMode(enabled);
+    ui.setPanoramicActive(enabled);
+  }
+
+  function enterCastleForTest(shelterId = 'shelter-castle-center'): boolean {
+    if (state.phase !== 'playing') return false;
+    if (state.castleInterior !== null && state.castleInterior.shelterId !== shelterId) {
+      dispatch({ type: 'exit_castle' });
+    }
+    dispatch({ type: 'enter_castle', shelterId });
+    return state.castleInterior !== null;
+  }
+
   window.__snakeGame = {
     getState: () => state,
     placeEdibleBotAheadForTest,
     placeFrostTargetsAheadForTest,
     spawnQuestForTest,
     spawnGuardianFairyForTest,
+    teleportToLandmarkForTest,
+    setPanoramicForTest,
+    enterCastleForTest,
   };
 
   renderer.sync(state);
