@@ -3100,3 +3100,317 @@ test('🛡️ Thử Thách Sinh Tồn (age9 + Khó): 10 hearts, badge, hostile m
   expect(externalRequests).toEqual([]);
   expect(errors, errors.join('\n')).toEqual([]);
 });
+
+test('🗺️🌳 Cuộc Phiêu Lưu Vương Quốc Đồ Sộ: /17 wonders compass, World Tree landmark teleport & region discovery, 4-theme scenery cycle, and zero HUD overlap at 1280x800', async ({
+  page,
+}) => {
+  const { errors, apiRequests, externalRequests } = attachErrorWatchers(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/');
+
+  await page.getByRole('button', { name: /Phiêu Lưu Thông Minh/ }).click();
+  await page.getByRole('button', { name: /Dễ \(Làm quen\)/ }).click();
+  await expect(overlay(page)).toHaveAttribute('data-mode', 'adventure');
+  await expect(overlay(page)).toHaveAttribute('data-difficulty', 'easy');
+
+  await page.keyboard.press('Enter');
+  await expect(overlay(page)).toHaveClass(/hidden/);
+
+  // 1) Verify Adventure Compass (#shelter-radar) is visible and displays /17 wonders counter
+  const shelterRadar = page.locator('#shelter-radar');
+  await expect(shelterRadar).toBeVisible();
+  await expect(shelterRadar).toContainText('/17');
+
+  // 2) Teleport to Colossal World Tree ('landmark-world-tree') and verify landmark & outer region discovery
+  const teleported = await page.evaluate(() => {
+    type Bridge = {
+      teleportToLandmarkForTest?: (landmarkId?: string) => boolean;
+    };
+    return (
+      (window as unknown as { __snakeGame?: Bridge }).__snakeGame?.teleportToLandmarkForTest?.(
+        'landmark-world-tree',
+      ) ?? false
+    );
+  });
+  expect(teleported).toBe(true);
+
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(() => {
+          type Bridge = {
+            getState: () => {
+              discoveredLandmarkIds: readonly string[];
+              currentRegionId: string;
+              adventureChapter: number;
+            };
+          };
+          const s = (window as unknown as { __snakeGame?: Bridge }).__snakeGame?.getState();
+          return {
+            hasWorldTree: s?.discoveredLandmarkIds.includes('landmark-world-tree') ?? false,
+            notCitadel: (s?.currentRegionId ?? 'royal_citadel') !== 'royal_citadel',
+            chapter: s?.adventureChapter ?? 0,
+          };
+        }),
+      { timeout: 5000, intervals: [100] },
+    )
+    .toMatchObject({ hasWorldTree: true, notCitadel: true });
+
+  await expect(shelterRadar).toContainText('/17');
+
+  // 3) Toggle Panoramic Vista Mode via HUD button (.hud-vista-btn) & keyboard (KeyO)
+  const vistaBtn = page.locator('#hud-top .hud-vista-btn');
+  await expect(vistaBtn).toBeVisible();
+  await expect(vistaBtn).not.toHaveClass(/is-active/);
+  await vistaBtn.click();
+  await expect(vistaBtn).toHaveClass(/is-active/);
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+  await page.keyboard.press('KeyO');
+  await expect(vistaBtn).not.toHaveClass(/is-active/);
+  await page.keyboard.press('KeyO');
+  await expect(vistaBtn).toHaveClass(/is-active/);
+
+  // 4) Cycle all 4 themes via #hud-top theme button to exercise WorldScenery3DView & SkySpectacle3DView setTheme + WebGL draw
+  const themeBtn = page.locator('#hud-top .hud-theme-btn');
+  await expect(themeBtn).toBeVisible();
+  const seenThemes = new Set<string>();
+  for (let i = 0; i < 4; i += 1) {
+    await themeBtn.click();
+    await page.evaluate(
+      () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+    );
+    const curTheme = await page.locator('html').getAttribute('data-theme');
+    if (curTheme) seenThemes.add(curTheme);
+  }
+  expect(seenThemes.size).toBe(4);
+
+  // 5) Verify 6 fairy skill buttons, dockHeight <= 180, and zero HUD overlaps across all standard boxes at 1280x800
+  await expect(page.locator('#fairy-skills .fairy-skill-btn')).toHaveCount(6);
+
+  const layout = await page.evaluate(() => {
+    type Box = { name: string; left: number; top: number; right: number; bottom: number };
+    const readBox = (selector: string): Box | null => {
+      const el = document.querySelector<HTMLElement>(selector);
+      if (!el || el.classList.contains('hidden')) return null;
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) return null;
+      return { name: selector, left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+    };
+    const overlap = (a: Box, b: Box): boolean =>
+      Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 &&
+      Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1;
+
+    const boxes = [
+      '#hud-top .hud-left-col',
+      '#hud-top .hud-right-col',
+      '#shelter-alerts-container',
+      '#top-hud-stack',
+      '#booster-buttons',
+      '#crown-radar',
+      '#shelter-radar',
+      '#magic-bar',
+      '#fairy-skills',
+      '#princess-btn',
+    ]
+      .map(readBox)
+      .filter((b): b is Box => b !== null);
+
+    const overlaps: string[] = [];
+    for (let i = 0; i < boxes.length; i += 1) {
+      for (let j = i + 1; j < boxes.length; j += 1) {
+        const a = boxes[i]!;
+        const b = boxes[j]!;
+        if (overlap(a, b)) overlaps.push(`${a.name} <-> ${b.name}`);
+      }
+    }
+
+    const outOfBounds = boxes
+      .filter((b) => b.left < 0 || b.top < 0 || b.right > 1280.5 || b.bottom > 800.5)
+      .map((b) => b.name);
+
+    const dock = document.querySelector<HTMLElement>('#fairy-skills')?.getBoundingClientRect();
+    return { overlaps, outOfBounds, dockHeight: dock?.height ?? 999 };
+  });
+
+  expect(layout.overlaps).toEqual([]);
+  expect(layout.outOfBounds).toEqual([]);
+  expect(layout.dockHeight).toBeLessThanOrEqual(180);
+
+  expect(apiRequests).toEqual([]);
+  expect(externalRequests).toEqual([]);
+  expect(errors, errors.join('\n')).toEqual([]);
+});
+
+test('🏰👗 Thế Giới Nội Thất Lâu Đài Xa Hoa: #enter-castle-btn zero overlap, Palace Boutique 3-slot dress-up, KeyR re-enter/exit, wardrobe persistence, and multi-palace interiors at 1280x800', async ({
+  page,
+}) => {
+  const { errors, apiRequests, externalRequests } = attachErrorWatchers(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/');
+
+  await page.getByRole('button', { name: /Phiêu Lưu Thông Minh/ }).click();
+  await page.getByRole('button', { name: /Dễ \(Làm quen\)/ }).click();
+  await page.keyboard.press('Enter');
+  await expect(overlay(page)).toHaveClass(/hidden/);
+
+  // 1) Player spawns inside shelter-castle-center -> #enter-castle-btn visible & zero overlap across 11 HUD boxes
+  const enterBtn = page.locator('#enter-castle-btn');
+  await expect(enterBtn).toBeVisible();
+
+  const outerLayout = await page.evaluate(() => {
+    type Box = { name: string; left: number; top: number; right: number; bottom: number };
+    const readBox = (selector: string): Box | null => {
+      const el = document.querySelector<HTMLElement>(selector);
+      if (!el || el.classList.contains('hidden')) return null;
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) return null;
+      return { name: selector, left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+    };
+    const overlap = (a: Box, b: Box): boolean =>
+      Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 &&
+      Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1;
+
+    const boxes = [
+      '#hud-top .hud-left-col',
+      '#hud-top .hud-right-col',
+      '#shelter-alerts-container',
+      '#top-hud-stack',
+      '#booster-buttons',
+      '#crown-radar',
+      '#shelter-radar',
+      '#magic-bar',
+      '#fairy-skills',
+      '#princess-btn',
+      '#enter-castle-btn',
+    ]
+      .map(readBox)
+      .filter((b): b is Box => b !== null);
+
+    const overlaps: string[] = [];
+    for (let i = 0; i < boxes.length; i += 1) {
+      for (let j = i + 1; j < boxes.length; j += 1) {
+        const a = boxes[i]!;
+        const b = boxes[j]!;
+        if (overlap(a, b)) overlaps.push(`${a.name} <-> ${b.name}`);
+      }
+    }
+    const outOfBounds = boxes
+      .filter((b) => b.left < 0 || b.top < 0 || b.right > 1280.5 || b.bottom > 800.5)
+      .map((b) => b.name);
+    return { overlaps, outOfBounds, hasEnterBtn: boxes.some((b) => b.name === '#enter-castle-btn') };
+  });
+  expect(outerLayout.hasEnterBtn).toBe(true);
+  expect(outerLayout.overlaps).toEqual([]);
+  expect(outerLayout.outOfBounds).toEqual([]);
+
+  // 2) Click #enter-castle-btn -> verify castleInterior active & Boutique HUD visible
+  await enterBtn.click();
+  const interiorHud = page.locator('#castle-interior-hud');
+  const boutiqueBar = page.locator('#castle-boutique-bar');
+  await expect(interiorHud).toBeVisible();
+  await expect(boutiqueBar).toBeVisible();
+
+  const insideSnap = await page.evaluate(() => {
+    type Bridge = {
+      getState: () => {
+        castleInterior: { shelterId: string; shelterKind: string } | null;
+      };
+    };
+    return (window as unknown as { __snakeGame?: Bridge }).__snakeGame?.getState().castleInterior;
+  });
+  expect(insideSnap).toMatchObject({
+    shelterId: 'shelter-castle-center',
+    shelterKind: 'castle',
+  });
+
+  // 3) Equip outfit, makeup, and weapon from #castle-boutique-bar & verify state.wardrobe updates all 3 slots
+  for (const slot of ['outfit', 'makeup', 'weapon'] as const) {
+    const equipBtn = page.locator(
+      `#castle-boutique-bar .boutique-card[data-slot="${slot}"] .boutique-equip-btn`,
+    );
+    await expect(equipBtn).toBeVisible();
+    await equipBtn.click();
+    await expect(equipBtn).toContainText('Đang Mặc');
+  }
+
+  const wardrobeInside = await page.evaluate(() => {
+    type Bridge = {
+      getState: () => {
+        wardrobe: {
+          equippedOutfit: string | null;
+          equippedMakeup: string | null;
+          equippedWeapon: string | null;
+        };
+      };
+    };
+    return (window as unknown as { __snakeGame?: Bridge }).__snakeGame?.getState().wardrobe;
+  });
+  expect(wardrobeInside).toMatchObject({
+    equippedOutfit: 'castle',
+    equippedMakeup: 'castle',
+    equippedWeapon: 'castle',
+  });
+
+  // 4) Exit via #exit-castle-btn, then test KeyR re-enter & KeyR exit; verify wardrobe persists
+  await page.locator('#exit-castle-btn').click();
+  await expect(interiorHud).toBeHidden();
+  await expect(enterBtn).toBeVisible();
+
+  await page.keyboard.press('KeyR');
+  await expect(interiorHud).toBeVisible();
+  await page.keyboard.press('KeyR');
+  await expect(interiorHud).toBeHidden();
+
+  const afterExit = await page.evaluate(() => {
+    type Bridge = {
+      getState: () => {
+        castleInterior: unknown;
+        wardrobe: {
+          equippedOutfit: string | null;
+          equippedMakeup: string | null;
+          equippedWeapon: string | null;
+        };
+      };
+    };
+    const s = (window as unknown as { __snakeGame?: Bridge }).__snakeGame?.getState();
+    return { castleInterior: s?.castleInterior, wardrobe: s?.wardrobe };
+  });
+  expect(afterExit.castleInterior).toBeNull();
+  expect(afterExit.wardrobe).toMatchObject({
+    equippedOutfit: 'castle',
+    equippedMakeup: 'castle',
+    equippedWeapon: 'castle',
+  });
+
+  // 5) Load distinct Mermaid & Candy palace interiors via test hook and verify zero WebGL/console errors
+  for (const [shelterId, expectedKind] of [
+    ['shelter-mermaid-sw', 'mermaid'],
+    ['shelter-candy-ne', 'candy'],
+  ] as const) {
+    const entered = await page.evaluate((id) => {
+      type Bridge = {
+        enterCastleForTest?: (sid?: string) => boolean;
+      };
+      return (window as unknown as { __snakeGame?: Bridge }).__snakeGame?.enterCastleForTest?.(id);
+    }, shelterId);
+    expect(entered).toBe(true);
+    await expect(interiorHud).toBeVisible();
+    await page.evaluate(
+      () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+    );
+    const kind = await page.evaluate(() => {
+      type Bridge = {
+        getState: () => { castleInterior: { shelterKind: string } | null };
+      };
+      return (window as unknown as { __snakeGame?: Bridge }).__snakeGame?.getState().castleInterior
+        ?.shelterKind;
+    });
+    expect(kind).toBe(expectedKind);
+    await page.locator('#exit-castle-btn').click();
+    await expect(interiorHud).toBeHidden();
+  }
+
+  expect(apiRequests).toEqual([]);
+  expect(externalRequests).toEqual([]);
+  expect(errors, errors.join('\n')).toEqual([]);
+});
