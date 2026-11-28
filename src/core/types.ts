@@ -88,6 +88,122 @@ export interface FrostZone {
 export type ShelterKind =
   'castle' | 'mushroom' | 'crystal' | 'mermaid' | 'candy' | 'blossom' | 'starlight';
 
+export type CastleCosmeticSlot = 'outfit' | 'makeup' | 'weapon';
+
+export type SignatureWeaponKind =
+  | 'royal_sword'
+  | 'ocean_trident'
+  | 'candy_scepter'
+  | 'sakura_staff'
+  | 'crystal_bow'
+  | 'starlight_wand'
+  | 'pixie_wand';
+
+export type CastleInteriorZone =
+  'outfit' | 'makeup' | 'weapon' | 'throne' | 'vanity' | 'banquet' | 'exit';
+
+export interface CastleRoyalSet {
+  readonly kind: ShelterKind;
+  readonly themeTitleVi: string;
+  readonly interiorSubtitleVi: string;
+  readonly outfitNameVi: string;
+  readonly outfitEmoji: string;
+  readonly gownPrimaryHex: number;
+  readonly gownSecondaryHex: number;
+  readonly gownGoldHex: number;
+  readonly makeupNameVi: string;
+  readonly makeupEmoji: string;
+  readonly hairHex: number;
+  readonly hairHighlightHex: number;
+  readonly irisHex: number;
+  readonly blushHex: number;
+  readonly lipHex: number;
+  readonly crownHex: number;
+  readonly crownGemHex: number;
+  readonly weaponKind: SignatureWeaponKind;
+  readonly weaponNameVi: string;
+  readonly weaponEmoji: string;
+  readonly weaponPrimaryHex: number;
+  readonly weaponAccentHex: number;
+}
+
+export interface CastleInteriorState {
+  readonly shelterId: string;
+  readonly shelterKind: ShelterKind;
+  readonly shelterNameVi: string;
+  readonly accentHex: number;
+  readonly pos: Vec2;
+  readonly prevPos: Vec2;
+  readonly heading: number;
+  readonly targetHeading: number | null;
+  readonly isDashing: boolean;
+  readonly nearZone: CastleInteriorZone | null;
+  readonly ticksInside: number;
+  readonly walkTicks?: number;
+}
+
+export interface RoyalWardrobeState {
+  readonly equippedOutfit: ShelterKind | null;
+  readonly equippedMakeup: ShelterKind | null;
+  readonly equippedWeapon: ShelterKind | null;
+  readonly unlockedKinds: readonly ShelterKind[];
+  readonly visitedInteriorIds: readonly string[];
+}
+
+export type AdventureRegionId =
+  | 'royal_citadel'
+  | 'mushroom_woods'
+  | 'crystal_sanctum'
+  | 'mermaid_lagoon'
+  | 'candy_highlands'
+  | 'blossom_valley'
+  | 'starlight_peaks';
+
+export interface AdventureRegion {
+  readonly id: AdventureRegionId;
+  readonly nameVi: string;
+  readonly icon: string;
+  readonly colorHex: number;
+}
+
+export type BiomeClimateId =
+  | 'temperate_sunny'
+  | 'misty_rainforest'
+  | 'spring_blossom'
+  | 'alpine_frost'
+  | 'tropical_lagoon'
+  | 'golden_highlands'
+  | 'aurora_peaks';
+
+export interface RegionClimate {
+  readonly id: BiomeClimateId;
+  readonly regionId: AdventureRegionId;
+  readonly nameVi: string;
+  readonly weatherVi: string;
+  readonly icon: string;
+  readonly temperatureC: number;
+  readonly accentHex: number;
+}
+
+export type LandmarkKind =
+  | 'world_tree'
+  | 'rainbow_arch'
+  | 'crystal_falls'
+  | 'astral_observatory'
+  | 'moon_shrine'
+  | 'dragon_colosseum';
+
+export interface WorldLandmark {
+  readonly id: string;
+  readonly kind: LandmarkKind;
+  readonly nameVi: string;
+  readonly icon: string;
+  readonly x: number;
+  readonly z: number;
+  readonly radius: number;
+  readonly colorHex: number;
+}
+
 /** Fairy Princess transformation stages (snake ↔ beautiful flying fairy princess). */
 export type PrincessStage = 'snake' | 'transforming' | 'princess' | 'returning';
 
@@ -367,7 +483,13 @@ export type GameEventKind =
   | 'princess_tour_lap'
   | 'bot_shoot'
   | 'bot_spell_cast'
-  | 'player_hit_by_magic';
+  | 'player_hit_by_magic'
+  | 'region_discovered'
+  | 'landmark_discovered'
+  | 'chapter_complete'
+  | 'castle_enter_interior'
+  | 'castle_exit_interior'
+  | 'castle_item_equipped';
 
 export interface GameEvent {
   readonly id: number;
@@ -379,6 +501,11 @@ export interface GameEvent {
   readonly messageVi?: string;
   readonly shelterId?: string;
   readonly spell?: BotMagicKind;
+  readonly regionId?: AdventureRegionId;
+  readonly landmarkId?: string;
+  readonly chapter?: number;
+  readonly cosmeticSlot?: CastleCosmeticSlot;
+  readonly shelterKind?: ShelterKind;
 }
 
 export interface RngState {
@@ -487,6 +614,11 @@ export interface GameState {
   readonly frostZones: readonly FrostZone[];
   readonly shelters: readonly ShelterHouse[];
   readonly discoveredShelterIds: readonly string[];
+  readonly landmarks: readonly WorldLandmark[];
+  readonly discoveredLandmarkIds: readonly string[];
+  readonly visitedRegionIds: readonly AdventureRegionId[];
+  readonly currentRegionId: AdventureRegionId;
+  readonly adventureChapter: number;
   readonly roamingMonsters: readonly RoamingMonster[];
   readonly monsterEvent: MonsterEventState;
   readonly inShelter: boolean;
@@ -502,6 +634,8 @@ export interface GameState {
   readonly princessTourShelterId: string | null;
   readonly princessTourAngle: number;
   readonly princessTourLaps: number;
+  readonly castleInterior: CastleInteriorState | null;
+  readonly wardrobe: RoyalWardrobeState;
 }
 
 export type GameAction =
@@ -533,4 +667,11 @@ export type GameAction =
   | { readonly type: 'set_age_profile'; readonly ageProfile: AgeProfile }
   | { readonly type: 'cast_fairy_skill'; readonly skill: FairySkillKind }
   | { readonly type: 'toggle_princess' }
-  | { readonly type: 'set_butterfly_hold'; readonly active: boolean };
+  | { readonly type: 'set_butterfly_hold'; readonly active: boolean }
+  | { readonly type: 'enter_castle'; readonly shelterId?: string }
+  | { readonly type: 'exit_castle' }
+  | {
+      readonly type: 'equip_castle_item';
+      readonly slot: CastleCosmeticSlot;
+      readonly kind: ShelterKind | null;
+    };

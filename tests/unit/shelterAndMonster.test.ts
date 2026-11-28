@@ -492,17 +492,19 @@ describe('Shelter Houses & Monster Calamity Core Logic', () => {
       expect(discoveryEv!.shelterId).toBe('shelter-mermaid-sw');
       expect(discoveryEv!.messageVi).toContain('Nàng Tiên Cá');
 
-      // Score increases by +150
-      expect(s.score).toBe(scoreBefore + SHELTER_DISCOVERY_SCORE);
+      // Score increases by +150 (shelter discovery) + 250 (Chapter 1 at 2 wonders)
+      expect(s.adventureChapter).toBe(1);
+      expect(s.score).toBe(scoreBefore + SHELTER_DISCOVERY_SCORE + 250);
       expect(s.best).toBe(s.score);
     });
 
     it('does not re-trigger discovery or duplicate bonus when entering an already discovered shelter', () => {
       let s = startPlaying();
-      // Pre-add candy castle to discoveredShelterIds
+      // Pre-add candy castle to discoveredShelterIds (2 wonders = Chapter 1 already reached)
       s = {
         ...s,
         discoveredShelterIds: ['shelter-castle-center', 'shelter-candy-ne'],
+        adventureChapter: 1,
         snake: [{ x: 179, z: -120 }], // inside Candy Castle
         heading: 0,
         inShelter: false,

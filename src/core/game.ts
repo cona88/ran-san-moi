@@ -89,6 +89,17 @@ import {
   stepMonsterEvent,
   stepRoamingMonsters,
 } from './shelter';
+import { createInitialLandmarks, stepAdventure } from './adventure';
+import {
+  createInitialWardrobe,
+  dashCastleInterior,
+  enterCastle,
+  equipCastleItem,
+  exitCastle,
+  steerCastleInterior,
+  stepCastleInterior,
+  turnCastleInterior,
+} from './castleInterior';
 
 const TURN_SPEED_RAD = 0.34;
 const WORLD_EDGE_PAD = 0.8;
@@ -403,7 +414,15 @@ function freshBoard(
     aoeBlasts: [],
     frostZones: [],
     shelters: state.shelters ?? createInitialShelters(config.worldRadius),
-    discoveredShelterIds: state.discoveredShelterIds ?? ['shelter-castle-center'],
+    discoveredShelterIds: ['shelter-castle-center'],
+    landmarks:
+      state.landmarks && config.worldRadius === state.config.worldRadius
+        ? state.landmarks
+        : createInitialLandmarks(config.worldRadius),
+    discoveredLandmarkIds: [],
+    visitedRegionIds: ['royal_citadel'],
+    currentRegionId: 'royal_citadel',
+    adventureChapter: 0,
     roamingMonsters:
       state.roamingMonsters && state.roamingMonsters.length > 0
         ? state.roamingMonsters
@@ -422,6 +441,8 @@ function freshBoard(
     princessTourShelterId: null,
     princessTourAngle: 0,
     princessTourLaps: 0,
+    castleInterior: null,
+    wardrobe: createInitialWardrobe(),
   });
 }
 
@@ -544,6 +565,11 @@ export function createInitialState(options: NewGameOptions = {}): GameState {
     frostZones: [],
     shelters: createInitialShelters(config.worldRadius),
     discoveredShelterIds: ['shelter-castle-center'],
+    landmarks: createInitialLandmarks(config.worldRadius),
+    discoveredLandmarkIds: [],
+    visitedRegionIds: ['royal_citadel'],
+    currentRegionId: 'royal_citadel',
+    adventureChapter: 0,
     roamingMonsters: createInitialRoamingMonsters(5, config.worldRadius),
     monsterEvent: createInitialMonsterEvent(config),
     inShelter: false,
@@ -559,6 +585,8 @@ export function createInitialState(options: NewGameOptions = {}): GameState {
     princessTourShelterId: null,
     princessTourAngle: 0,
     princessTourLaps: 0,
+    castleInterior: null,
+    wardrobe: createInitialWardrobe(),
   });
 }
 
@@ -1199,6 +1227,7 @@ function step(state: GameState): GameState {
   working = stepPrincess(working, head);
   working = applyDifficultyMagicRecovery(working);
   working = stepSilkWebs(working);
+  working = stepAdventure(working);
   working = syncSnakeLengthToLevel(working);
 
   // 8b. Step Sky Monster Calamity Event & Calamity Strike
@@ -1368,6 +1397,9 @@ export function reduce(state: GameState, action: GameAction): GameState {
 
     case 'steer': {
       if (state.phase !== 'playing') return state;
+      if (state.castleInterior !== null) {
+        return steerCastleInterior(state, action.angle);
+      }
       if (action.angle === null || !Number.isFinite(action.angle)) {
         return state.targetHeading === null && state.events.length === 0
           ? state
@@ -1387,6 +1419,9 @@ export function reduce(state: GameState, action: GameAction): GameState {
     case 'turn': {
       if (state.phase !== 'playing') return state;
       const angle = directionToAngle(action.direction);
+      if (state.castleInterior !== null) {
+        return turnCastleInterior(state, angle);
+      }
       return {
         ...state,
         targetHeading: angle,
@@ -1397,15 +1432,24 @@ export function reduce(state: GameState, action: GameAction): GameState {
     }
 
     case 'tick':
-      return state.phase === 'playing' ? clearOnGameover(step(state)) : state;
+      if (state.phase !== 'playing') return state;
+      if (state.castleInterior !== null) {
+        return stepCastleInterior(state);
+      }
+      return clearOnGameover(step(state));
 
     case 'projectile_step':
-      return state.phase === 'playing'
+      return state.phase === 'playing' && state.castleInterior === null
         ? syncSnakeLengthToLevel(stepProjectiles(state, action.dtMs))
         : state;
 
     case 'shoot': {
-      if (state.phase !== 'playing' || state.shootCooldownMs > 0 || isPrincessActive(state)) {
+      if (
+        state.phase !== 'playing' ||
+        state.castleInterior !== null ||
+        state.shootCooldownMs > 0 ||
+        isPrincessActive(state)
+      ) {
         return state;
       }
       const head = state.snake[0];
@@ -1427,7 +1471,9 @@ export function reduce(state: GameState, action: GameAction): GameState {
     }
 
     case 'morph': {
-      if (state.phase !== 'playing' || isPrincessActive(state)) return state;
+      if (state.phase !== 'playing' || state.castleInterior !== null || isPrincessActive(state)) {
+        return state;
+      }
       let nextForm = state.form;
       if (action.form !== undefined) {
         nextForm = action.form;
@@ -1456,6 +1502,9 @@ export function reduce(state: GameState, action: GameAction): GameState {
 
     case 'dash': {
       if (state.phase !== 'playing') return state;
+      if (state.castleInterior !== null) {
+        return dashCastleInterior(state, action.active);
+      }
       if (action.active) {
         if (state.dashEnergy <= 0 || state.isDashing) return state;
         const ev = appendEvents([], state.eventSeq, [
@@ -1477,7 +1526,13 @@ export function reduce(state: GameState, action: GameAction): GameState {
     }
 
     case 'shield': {
-      if (state.phase !== 'playing' || state.shieldCooldownTicks > 0) return state;
+      if (
+        state.phase !== 'playing' ||
+        state.castleInterior !== null ||
+        state.shieldCooldownTicks > 0
+      ) {
+        return state;
+      }
       const cdScale = difficultyTuningFor(state.difficulty).fairyCooldownScale;
       const shieldCooldownTicks = cdScale < 1 ? Math.max(1, Math.ceil(60 * cdScale)) : 60;
       const ev = appendEvents([], state.eventSeq, [
@@ -1497,7 +1552,7 @@ export function reduce(state: GameState, action: GameAction): GameState {
     }
 
     case 'activate_booster':
-      return activateBooster(state, action.booster);
+      return state.castleInterior !== null ? state : activateBooster(state, action.booster);
 
     case 'pause':
       return state.phase === 'playing' ? { ...state, phase: 'paused', events: [] } : state;
@@ -1551,17 +1606,26 @@ export function reduce(state: GameState, action: GameAction): GameState {
     }
 
     case 'cast_fairy_skill': {
-      if (isPrincessActive(state)) return state;
+      if (state.castleInterior !== null || isPrincessActive(state)) return state;
       const next = castFairySkill(state, action.skill);
       const scale = difficultyTuningFor(state.difficulty).fairyCooldownScale;
       return scaleNewlyStartedFairyCooldowns(state, next, scale);
     }
 
     case 'set_butterfly_hold':
-      if (action.active && isPrincessActive(state)) return state;
+      if (state.castleInterior !== null || (action.active && isPrincessActive(state))) return state;
       return setButterflyHold(state, action.active);
 
     case 'toggle_princess':
-      return togglePrincess(state);
+      return state.castleInterior !== null ? state : togglePrincess(state);
+
+    case 'enter_castle':
+      return enterCastle(state, action.shelterId);
+
+    case 'exit_castle':
+      return exitCastle(state);
+
+    case 'equip_castle_item':
+      return equipCastleItem(state, action.slot, action.kind);
   }
 }
