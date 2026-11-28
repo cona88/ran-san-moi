@@ -1,3 +1,11 @@
+import {
+  DEFAULT_LANDMARKS,
+  findNearestUndiscoveredWonder,
+  getClimateForRegion,
+  getRegionAt,
+  type AdventureRegionId,
+  type LandmarkKind,
+} from '../core';
 import { isSurvivalChallenge } from '../core/botMagic';
 import { DEFAULT_SESSION_DURATION_MS, FORM_METADATA } from '../core/config';
 import type {
@@ -55,6 +63,25 @@ function shelterRadarInfo(kind: string): { icon: string; shortName: string } {
     case 'mushroom':
     default:
       return { icon: '🍄', shortName: 'Nhà Nấm' };
+  }
+}
+
+function landmarkShortName(kind: LandmarkKind | string, fallbackNameVi: string): string {
+  switch (kind) {
+    case 'world_tree':
+      return 'Đại Thụ Thế Giới';
+    case 'rainbow_arch':
+      return 'Cổng Cầu Vồng';
+    case 'crystal_falls':
+      return 'Thác Pha Lê';
+    case 'astral_observatory':
+      return 'Đài Thiên Văn';
+    case 'moon_shrine':
+      return 'Đền Ánh Trăng';
+    case 'dragon_colosseum':
+      return 'Đấu Trường Rồng';
+    default:
+      return fallbackNameVi.replace(/^\S+\s+/u, '').trim() || 'Kỳ Quan';
   }
 }
 
@@ -126,6 +153,7 @@ export class HudBar {
 
   private readonly controllerBadge: HTMLElement;
   private readonly controllerText: HTMLElement;
+  private readonly climatePill: HTMLElement;
   private readonly buttonStrip: HTMLElement;
   private readonly stickDot: HTMLElement;
   private readonly buttonPills = new Map<string, HTMLElement>();
@@ -140,12 +168,14 @@ export class HudBar {
   private readonly soundBtn: HTMLButtonElement;
   private readonly musicBtn: HTMLButtonElement;
   private readonly vibrationBtn: HTMLButtonElement;
+  private readonly vistaBtn: HTMLButtonElement;
   private readonly themeBtn: HTMLButtonElement;
   private readonly pauseBtn: HTMLButtonElement;
 
   private soundEnabled: boolean;
   private musicEnabled: boolean;
   private vibrationEnabled: boolean;
+  private panoramicActive = false;
   private activeTheme: VisualTheme;
   private activeForm: SnakeForm = 'dragon';
   private activeAgeProfile: AgeProfile = 'age6';
@@ -189,6 +219,7 @@ export class HudBar {
   private lastMonsterAlertKey = '';
   private lastSafeShelterKey = '';
   private lastShelterRadarKey = '';
+  private lastClimateKey = '';
   private lastDiscoveredCount = -1;
   private lastKnownDiscoveredIds = new Set<string>();
   private castleDiscoveryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -317,7 +348,20 @@ export class HudBar {
       this.webHidBtn,
     );
 
-    const leftColEl = el('div', { className: 'hud-left-col' }, statsCard, this.controllerBadge);
+    this.climatePill = el('div', {
+      id: 'hud-climate-pill',
+      className: 'hud-group hud-climate-pill hidden',
+      text: '',
+      ariaLabel: 'Vùng đất và khí hậu hiện tại',
+    });
+
+    const leftColEl = el(
+      'div',
+      { className: 'hud-left-col' },
+      statsCard,
+      this.controllerBadge,
+      this.climatePill,
+    );
 
     // Top-right: Quick toggles (above LeaderboardPanel)
     this.soundBtn = el('button', {
@@ -351,6 +395,21 @@ export class HudBar {
       this.vibrationEnabled = !this.vibrationEnabled;
       this.renderToggles();
       this.callbacks.onToggleVibration(this.vibrationEnabled);
+    });
+
+    this.vistaBtn = el('button', {
+      className: 'hud-icon-btn hud-vista-btn',
+      type: 'button',
+      text: '🔭',
+      title: 'Góc nhìn Toàn Cảnh Điện Ảnh (phím O)',
+      ariaLabel: 'Đổi góc nhìn Toàn Cảnh',
+    });
+    this.vistaBtn.setAttribute('aria-pressed', 'false');
+    this.vistaBtn.addEventListener('click', () => {
+      const next = this.callbacks.onToggleVista?.();
+      if (typeof next === 'boolean') {
+        this.setPanoramicActive(next);
+      }
     });
 
     this.themeBtn = el('button', {
@@ -398,6 +457,7 @@ export class HudBar {
       this.soundBtn,
       this.musicBtn,
       this.vibrationBtn,
+      this.vistaBtn,
       this.themeBtn,
       this.pauseBtn,
     );
@@ -526,6 +586,16 @@ export class HudBar {
   setTheme(theme: VisualTheme): void {
     this.activeTheme = theme;
     this.renderToggles();
+  }
+
+  /** Sync visual active glow on the Panoramic Vista (`🔭`) HUD button. */
+  setPanoramicActive(active: boolean): void {
+    this.panoramicActive = active;
+    this.vistaBtn.classList.toggle('is-active', active);
+    this.vistaBtn.setAttribute('aria-pressed', String(active));
+    this.vistaBtn.title = active
+      ? 'Toàn Cảnh Điện Ảnh: Đang bật (phím O để về Góc Nhìn Chiến Đấu)'
+      : 'Góc nhìn Toàn Cảnh Điện Ảnh (phím O)';
   }
 
   private testStateOverride: Partial<GameState> | null = null;
@@ -805,6 +875,10 @@ export class HudBar {
         this.lastShelterRadarKey = 'hidden';
         this.shelterRadarEl.classList.add('hidden');
       }
+      if (this.lastClimateKey !== 'hidden') {
+        this.lastClimateKey = 'hidden';
+        this.climatePill.classList.add('hidden');
+      }
       return;
     }
 
@@ -962,59 +1036,104 @@ export class HudBar {
       }
     }
 
-    // 3. Shelter Compass / Radar Arrow pointing to nearest shelter
+    // 3. Adventure & Shelter Compass / Radar Arrow + Regional Climate Pill
     const head = state.snake[0];
+    if (head) {
+      const curRegion = getRegionAt(head);
+      const climate = getClimateForRegion(curRegion.id);
+      const climateKey = `${curRegion.id}|${climate.id}`;
+      if (climateKey !== this.lastClimateKey) {
+        this.lastClimateKey = climateKey;
+        const shortRegion = curRegion.nameVi.replace(/^\S+\s+/u, '').trim();
+        this.climatePill.textContent = `${climate.icon} ${shortRegion} • ${climate.nameVi} • ${climate.temperatureC}°C`;
+        this.climatePill.title = `${curRegion.nameVi} — ${climate.nameVi}: ${climate.weatherVi} (${climate.temperatureC}°C)`;
+        this.climatePill.style.setProperty(
+          '--climate-accent',
+          `#${climate.accentHex.toString(16).padStart(6, '0')}`,
+        );
+        this.climatePill.classList.remove('hidden');
+      }
+    } else if (this.lastClimateKey !== 'hidden') {
+      this.lastClimateKey = 'hidden';
+      this.climatePill.classList.add('hidden');
+    }
+
     const shelters = state.shelters ?? [];
     if (!head || shelters.length === 0) {
       if (this.lastShelterRadarKey !== 'hidden') {
         this.lastShelterRadarKey = 'hidden';
         this.shelterRadarEl.classList.add('hidden');
       }
+      if (this.lastClimateKey !== 'hidden') {
+        this.lastClimateKey = 'hidden';
+        this.climatePill.classList.add('hidden');
+      }
       return;
     }
 
-    const isDanger = (isWarning || isStrike) && !inShelter;
-    const discoveredIds = new Set(discovered);
-    const grandKinds = new Set(['mermaid', 'candy', 'blossom', 'starlight']);
-
-    // During peaceful exploration, guide daughter toward undiscovered Grand Wonder Palaces (or undiscovered sanctuaries)
-    let radarTargetPool: readonly ShelterHouse[] = shelters;
-    if (!inShelter && !isDanger) {
-      const undiscoveredGrand = shelters.filter(
-        (s) => grandKinds.has(s.kind) && !discoveredIds.has(s.id),
-      );
-      if (undiscoveredGrand.length > 0) {
-        radarTargetPool = undiscoveredGrand;
-      } else {
-        const undiscoveredAny = shelters.filter((s) => !discoveredIds.has(s.id));
-        if (undiscoveredAny.length > 0) {
-          radarTargetPool = undiscoveredAny;
-        }
-      }
-    }
-
-    let nearest: ShelterHouse = radarTargetPool[0]!;
-    let minDist = Math.hypot(nearest.x - head.x, nearest.z - head.z);
-    for (let i = 1; i < radarTargetPool.length; i++) {
-      const s = radarTargetPool[i]!;
-      const d = Math.hypot(s.x - head.x, s.z - head.z);
-      if (d < minDist) {
-        minDist = d;
-        nearest = s;
-      }
-    }
-
-    const distRounded = Math.round(minDist);
-    const dx = nearest.x - head.x;
-    const dz = nearest.z - head.z;
-    const angleRad = Math.atan2(dz, dx);
-    const angleRounded = Number(angleRad.toFixed(2));
-    const isNewTarget = !inShelter && !isDanger && !discoveredIds.has(nearest.id);
+    const landmarks = state.landmarks ?? DEFAULT_LANDMARKS;
+    const discoveredLandmarks = state.discoveredLandmarkIds ?? [];
     const totalShelters = shelters.length;
-    const discoveredCount =
-      (state as { discoveredShelterIds?: readonly string[] }).discoveredShelterIds?.length ??
-      (inShelter ? 1 : 0);
-    const radarKey = `${inShelter ? 1 : 0}|${isDanger ? 1 : 0}|${isNewTarget ? 1 : 0}|${nearest.id}|${distRounded}|${angleRounded}|${discoveredCount}/${totalShelters}`;
+    const totalWonders = totalShelters + landmarks.length;
+    const discoveredSheltersCount = discovered.length > 0 ? discovered.length : inShelter ? 1 : 0;
+    const discoveredWondersCount = discoveredSheltersCount + discoveredLandmarks.length;
+
+    const region = getRegionAt(head);
+    const regionId: AdventureRegionId = region.id;
+    const isMonsterActive = isWarning || isStrike;
+    const isDanger = isMonsterActive && !inShelter;
+
+    // Nearest physical storm shelter (always used when monster calamity is active, or as fallback when all 17 wonders are discovered)
+    let nearestShelter: ShelterHouse = shelters[0]!;
+    let minShelterDist = Math.hypot(nearestShelter.x - head.x, nearestShelter.z - head.z);
+    for (let i = 1; i < shelters.length; i++) {
+      const s = shelters[i]!;
+      const d = Math.hypot(s.x - head.x, s.z - head.z);
+      if (d < minShelterDist) {
+        minShelterDist = d;
+        nearestShelter = s;
+      }
+    }
+
+    const wonder = !isMonsterActive
+      ? findNearestUndiscoveredWonder(head, {
+          shelters,
+          discoveredShelterIds: discovered,
+          landmarks,
+          discoveredLandmarkIds: discoveredLandmarks,
+        })
+      : null;
+
+    let targetId = nearestShelter.id;
+    let targetX = nearestShelter.x;
+    let targetZ = nearestShelter.z;
+    let targetDist = minShelterDist;
+    let targetIcon = shelterRadarInfo(nearestShelter.kind).icon;
+    let targetShortName = shelterRadarInfo(nearestShelter.kind).shortName;
+    let isNewWonderTarget = false;
+
+    if (!isMonsterActive && wonder !== null) {
+      targetId = wonder.id;
+      targetX = wonder.x;
+      targetZ = wonder.z;
+      targetDist = wonder.distance;
+      isNewWonderTarget = true;
+      if (wonder.isLandmark) {
+        const lm = landmarks.find((l) => l.id === wonder.id);
+        targetIcon = wonder.icon;
+        targetShortName = landmarkShortName(lm?.kind ?? '', wonder.nameVi);
+      } else {
+        const sh = shelters.find((s) => s.id === wonder.id);
+        const info = shelterRadarInfo(sh?.kind ?? '');
+        targetIcon = info.icon;
+        targetShortName = info.shortName;
+      }
+    }
+
+    const distRounded = Math.round(targetDist);
+    const angleRad = Math.atan2(targetZ - head.z, targetX - head.x);
+    const angleRounded = Number(angleRad.toFixed(2));
+    const radarKey = `${inShelter ? 1 : 0}|${isMonsterActive ? 1 : 0}|${isDanger ? 1 : 0}|${isNewWonderTarget ? 1 : 0}|${regionId}|${targetId}|${distRounded}|${angleRounded}|${discoveredWondersCount}/${totalWonders}|${discoveredSheltersCount}/${totalShelters}`;
 
     if (radarKey !== this.lastShelterRadarKey) {
       this.lastShelterRadarKey = radarKey;
@@ -1022,20 +1141,34 @@ export class HudBar {
       this.shelterRadarEl.classList.toggle('urgent', isDanger);
       this.shelterRadarEl.classList.toggle('safe', inShelter);
 
-      this.shelterRadarProgress.textContent = `🏰 ${discoveredCount}/${totalShelters} Lâu Đài Đã Khám Phá`;
+      this.shelterRadarProgress.textContent = `🗺️ ${discoveredWondersCount}/${totalWonders} • 🏰 ${discoveredSheltersCount}/${totalShelters} Lâu Đài Đã Khám Phá`;
+      this.shelterRadarProgress.title = `${region.nameVi} • Đã khám phá ${discoveredWondersCount}/${totalWonders} Kỳ Quan & Lâu Đài`;
 
-      const info = shelterRadarInfo(nearest.kind);
       if (inShelter) {
-        this.shelterRadarIcon.textContent = info.icon || '🏡';
-        this.shelterRadarArrow.classList.add('hidden');
-        this.shelterRadarText.textContent = '✨ Đã Trú Ẩn An Toàn!';
-      } else {
-        this.shelterRadarIcon.textContent = info.icon;
+        const currentHouse = shelters.find((s) => s.id === currentId) ?? nearestShelter;
+        const currentInfo = shelterRadarInfo(currentHouse.kind);
+        if (!isMonsterActive && wonder !== null) {
+          this.shelterRadarIcon.textContent = targetIcon;
+          this.shelterRadarArrow.classList.remove('hidden');
+          this.shelterRadarArrow.style.transform = `rotate(${angleRad.toFixed(3)}rad)`;
+          this.shelterRadarText.textContent = `✨ Đã Trú Ẩn An Toàn! • ${targetShortName} • ${distRounded}m`;
+        } else {
+          this.shelterRadarIcon.textContent = currentInfo.icon || '🏡';
+          this.shelterRadarArrow.classList.add('hidden');
+          this.shelterRadarText.textContent = '✨ Đã Trú Ẩn An Toàn!';
+        }
+      } else if (isDanger) {
+        this.shelterRadarIcon.textContent = targetIcon;
         this.shelterRadarArrow.classList.remove('hidden');
         this.shelterRadarArrow.style.transform = `rotate(${angleRad.toFixed(3)}rad)`;
-        this.shelterRadarText.textContent = isNewTarget
-          ? `${info.shortName} ✨ Mới • ${distRounded}m`
-          : `${info.shortName} • ${distRounded}m`;
+        this.shelterRadarText.textContent = `🚨 TRÚ ẨN NGAY • ${targetShortName} • ${distRounded}m`;
+      } else {
+        this.shelterRadarIcon.textContent = targetIcon;
+        this.shelterRadarArrow.classList.remove('hidden');
+        this.shelterRadarArrow.style.transform = `rotate(${angleRad.toFixed(3)}rad)`;
+        this.shelterRadarText.textContent = isNewWonderTarget
+          ? `${targetShortName} ✨ Mới • ${distRounded}m`
+          : `${targetShortName} • ${distRounded}m`;
       }
     }
   }
@@ -1113,6 +1246,9 @@ export class HudBar {
 
     const label = themeLabelVi(this.activeTheme);
     this.themeBtn.title = `Đổi chủ đề 3D (Hiện tại: ${label})`;
+
+    this.vistaBtn.classList.toggle('is-active', this.panoramicActive);
+    this.vistaBtn.setAttribute('aria-pressed', String(this.panoramicActive));
   }
 
   private async handleConnectWebHid(): Promise<void> {

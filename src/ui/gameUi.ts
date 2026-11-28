@@ -1,3 +1,4 @@
+import { ADVENTURE_REGIONS, CASTLE_ROYAL_SETS, DEFAULT_LANDMARKS } from '../core';
 import { FORM_METADATA } from '../core/config';
 import type {
   AgeProfile,
@@ -16,6 +17,7 @@ import { AbsorbedPowerBanner } from './absorbedPower';
 import { AchievementToast } from './achievementToast';
 import { BoosterButtons } from './boosters';
 import { BossBar } from './bossBar';
+import { CastleInteriorUI } from './castleInteriorUi';
 import { CrownRadarArrow } from './crownArrow';
 import { el } from './dom';
 import { FairySkillButtons } from './fairySkills';
@@ -91,7 +93,16 @@ export class GameUI {
   private readonly toasts: AchievementToast;
   private readonly fairySkills: FairySkillButtons;
   private readonly princessButton: PrincessButton;
+  private readonly castleInteriorUi: CastleInteriorUI;
   private readonly survivalFx: SurvivalFx;
+
+  private readonly adventureCrestEl: HTMLElement;
+  private readonly adventureCrestKicker: HTMLElement;
+  private readonly adventureCrestTitle: HTMLElement;
+  private readonly adventureCrestSub: HTMLElement;
+  private adventureCrestTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastLandmarkCrestTitle = '';
+  private lastLandmarkCrestAtMs = -Infinity;
 
   private lastPhase: GamePhase | '' = '';
   private bestAtRunStart = 0;
@@ -154,7 +165,34 @@ export class GameUI {
     this.toasts = new AchievementToast(uiRoot);
     this.fairySkills = new FairySkillButtons(this.shellEl, callbacks);
     this.princessButton = new PrincessButton(this.shellEl, callbacks);
+    this.castleInteriorUi = new CastleInteriorUI(this.shellEl, callbacks);
     this.survivalFx = new SurvivalFx(this.shellEl);
+
+    this.adventureCrestKicker = el('span', { className: 'adventure-crest-kicker', text: '' });
+    this.adventureCrestTitle = el('div', { className: 'adventure-crest-title', text: '' });
+    this.adventureCrestSub = el('div', { className: 'adventure-crest-sub', text: '' });
+    this.adventureCrestEl = el(
+      'div',
+      { id: 'adventure-crest', className: 'adventure-crest hidden' },
+      el(
+        'div',
+        { className: 'adventure-crest-divider top' },
+        el('span', { className: 'adventure-crest-line' }),
+        this.adventureCrestKicker,
+        el('span', { className: 'adventure-crest-line' }),
+      ),
+      this.adventureCrestTitle,
+      this.adventureCrestSub,
+      el(
+        'div',
+        { className: 'adventure-crest-divider bottom' },
+        el('span', { className: 'adventure-crest-line' }),
+        el('span', { className: 'adventure-crest-diamond', text: '◆' }),
+        el('span', { className: 'adventure-crest-line' }),
+      ),
+    );
+    this.adventureCrestEl.setAttribute('aria-hidden', 'true');
+    this.shellEl.appendChild(this.adventureCrestEl);
   }
 
   getSelectedMode(): GameMode {
@@ -188,13 +226,16 @@ export class GameUI {
     this.magicBar.syncState(state);
     this.fairySkills.syncState(state);
     this.princessButton.syncState(state);
+    this.castleInteriorUi.syncState(state);
     this.survivalFx.syncState(state);
 
+    const inCastleInterior = state.phase === 'playing' && state.castleInterior !== null;
     const isFlying = state.butterflyStage === 'butterfly' && state.phase === 'playing';
     const isSpraying = state.sprayActiveTicks > 0 && state.phase === 'playing';
-    const effectsKey = `${isFlying ? 1 : 0}/${isSpraying ? 1 : 0}`;
+    const effectsKey = `${isFlying ? 1 : 0}/${isSpraying ? 1 : 0}/${inCastleInterior ? 1 : 0}`;
     if (effectsKey !== this.lastEffectsKey) {
       this.lastEffectsKey = effectsKey;
+      this.shellEl.classList.toggle('in-castle-interior', inCastleInterior);
       this.shellEl.classList.toggle('butterfly-flying', isFlying);
       this.shellEl.classList.toggle('spraying', isSpraying);
       const fairyDock = this.shellEl.querySelector<HTMLElement>('#fairy-skills');
@@ -227,15 +268,18 @@ export class GameUI {
 
       switch (state.phase) {
         case 'ready':
+          this.hideAdventureCrest();
           this.overlay.showReady();
           break;
         case 'playing':
           this.overlay.hide();
           break;
         case 'paused':
+          this.hideAdventureCrest();
           this.overlay.showPaused(state);
           break;
         case 'gameover': {
+          this.hideAdventureCrest();
           const isNewBest = state.score > 0 && state.score > this.bestAtRunStart;
           this.overlay.showGameOver(state, isNewBest);
           break;
@@ -693,6 +737,144 @@ export class GameUI {
         }
         break;
       }
+
+      case 'region_discovered': {
+        const reg = event.regionId ? ADVENTURE_REGIONS[event.regionId] : null;
+        if (screenPos) {
+          this.popups.spawn(
+            screenPos.x,
+            screenPos.y,
+            reg ? `${reg.icon} Vùng Đất Mới!` : '🗺️ Vùng Đất Mới!',
+            '#7ef8ff',
+          );
+        }
+        this.showToast(
+          '🗺️ Vùng Đất Mới!',
+          event.messageVi ??
+            (reg ? `🗺️ Khám phá vùng đất mới: ${reg.nameVi}! ✨` : 'Khám phá vùng đất mới! ✨'),
+          '🧭',
+        );
+        if (state.phase === 'playing') {
+          this.showAdventureCrest(
+            'region',
+            '✦ VÙNG ĐẤT MỚI ✦',
+            reg?.nameVi ?? '🗺️ Vùng Đất Huyền Thoại',
+            'Khám phá vùng đất mới của Vương Quốc ✨',
+          );
+        }
+        break;
+      }
+
+      case 'landmark_discovered': {
+        const landmarks = state.landmarks ?? DEFAULT_LANDMARKS;
+        const lm = event.landmarkId ? landmarks.find((l) => l.id === event.landmarkId) : null;
+        const pts = event.points ?? 200;
+        const lmTitle = lm?.nameVi ?? '🌟 Kỳ Quan Khổng Lồ';
+        if (screenPos) {
+          this.popups.spawnCelebration(screenPos.x, screenPos.y, `+${pts} ✨`, '#ffd447');
+        }
+        this.showToast(
+          '🌟 Khám Phá Kỳ Quan!',
+          event.messageVi ?? `✨ Khám phá ${lmTitle}! (+${pts}đ) 🌟`,
+          '🏛️',
+        );
+        if (state.phase === 'playing') {
+          this.lastLandmarkCrestTitle = lmTitle;
+          this.lastLandmarkCrestAtMs = performance.now();
+          this.showAdventureCrest(
+            'landmark',
+            '✦ KỲ QUAN HUYỀN THOẠI ✦',
+            lmTitle,
+            `+${pts}đ • Hồi đầy Lướt ✨`,
+          );
+        }
+        break;
+      }
+
+      case 'chapter_complete': {
+        const ch = event.chapter ?? state.adventureChapter;
+        const pts = event.points ?? 250;
+        if (screenPos) {
+          this.popups.spawnCelebration(
+            screenPos.x,
+            screenPos.y,
+            `🌈 Chương ${ch}! +${pts} ✨`,
+            '#ffd447',
+          );
+        }
+        this.showToast(
+          '👑 Hoàn Thành Chương Phiêu Lưu!',
+          event.messageVi ?? 'Chúc mừng bé chinh phục cột mốc phiêu lưu mới! 🏆',
+          '🏆',
+        );
+        if (state.phase === 'playing') {
+          const sameTickAsLandmark =
+            this.lastLandmarkCrestTitle.length > 0 &&
+            performance.now() - this.lastLandmarkCrestAtMs < 120;
+          if (sameTickAsLandmark) {
+            this.showAdventureCrest(
+              'chapter',
+              `✦ KỲ QUAN HUYỀN THOẠI • CHƯƠNG ${ch} ✦`,
+              this.lastLandmarkCrestTitle,
+              `+200đ • Hồi đầy Lướt • Hoàn thành Chương ${ch} (+${pts}đ) 🏆`,
+            );
+          } else {
+            const chapterHeadline =
+              event.messageVi?.replace(/^[^C]*?(Chương\s+\d+:[^!(]+).*$/u, '$1').trim() ||
+              `Chương ${ch}: Huyền Thoại Vương Quốc`;
+            this.showAdventureCrest(
+              'chapter',
+              '✦ HOÀN THÀNH CHƯƠNG ✦',
+              `👑 ${chapterHeadline}`,
+              `+${pts}đ • +15 XP 🏆`,
+            );
+          }
+        }
+        break;
+      }
+
+      case 'castle_enter_interior': {
+        const interior = state.castleInterior;
+        const set = interior ? CASTLE_ROYAL_SETS[interior.shelterKind] : null;
+        this.showToast(
+          interior?.shelterNameVi ?? '🏰 Chào Mừng Vào Lâu Đài!',
+          event.messageVi ?? set?.interiorSubtitleVi ?? 'Khám phá Tủ Đồ Hoàng Gia lộng lẫy ✨',
+          set?.outfitEmoji ?? '🏰',
+        );
+        break;
+      }
+
+      case 'castle_exit_interior': {
+        this.showToast(
+          '🚪 Quay Ra Vương Quốc!',
+          event.messageVi ?? 'Trang phục & vũ khí hoàng gia vẫn đồng hành cùng bé ✨',
+          '🌟',
+        );
+        break;
+      }
+
+      case 'castle_item_equipped': {
+        const kind = event.shelterKind ?? null;
+        const set = kind ? CASTLE_ROYAL_SETS[kind] : null;
+        const slot = event.cosmeticSlot ?? 'outfit';
+        const label =
+          set === null
+            ? '✨ Về Mặc Định'
+            : slot === 'outfit'
+              ? `${set.outfitEmoji} ${set.outfitNameVi}`
+              : slot === 'makeup'
+                ? `${set.makeupEmoji} ${set.makeupNameVi}`
+                : `${set.weaponEmoji} ${set.weaponNameVi}`;
+        if (screenPos) {
+          this.popups.spawnCelebration(screenPos.x, screenPos.y, label, '#ffd447');
+        }
+        this.showToast(
+          '✨ Thay Đồ Hoàng Gia!',
+          event.messageVi ?? `${label} lấp lánh tuyệt đẹp!`,
+          set?.outfitEmoji ?? '👑',
+        );
+        break;
+      }
     }
   }
 
@@ -749,7 +931,51 @@ export class GameUI {
     this.toasts.showToast(title, subtitle, icon);
   }
 
+  /** Sync visual active glow on the HUD Panoramic Vista (`🔭`) button. */
+  setPanoramicActive(active: boolean): void {
+    this.hud.setPanoramicActive(active);
+  }
+
+  private showAdventureCrest(
+    variant: 'region' | 'landmark' | 'chapter',
+    kicker: string,
+    title: string,
+    subtitle: string,
+  ): void {
+    if (this.adventureCrestTimer !== null) {
+      clearTimeout(this.adventureCrestTimer);
+      this.adventureCrestTimer = null;
+    }
+    this.adventureCrestKicker.textContent = kicker;
+    this.adventureCrestTitle.textContent = title;
+    this.adventureCrestSub.textContent = subtitle;
+    this.adventureCrestEl.classList.remove(
+      'hidden',
+      'crest-region',
+      'crest-landmark',
+      'crest-chapter',
+      'crest-active',
+    );
+    this.adventureCrestEl.classList.add(`crest-${variant}`);
+    void this.adventureCrestEl.offsetWidth;
+    this.adventureCrestEl.classList.add('crest-active');
+
+    this.adventureCrestTimer = setTimeout(() => {
+      this.hideAdventureCrest();
+    }, 2600);
+  }
+
+  private hideAdventureCrest(): void {
+    if (this.adventureCrestTimer !== null) {
+      clearTimeout(this.adventureCrestTimer);
+      this.adventureCrestTimer = null;
+    }
+    this.adventureCrestEl.classList.remove('crest-active');
+    this.adventureCrestEl.classList.add('hidden');
+  }
+
   dispose(): void {
+    this.hideAdventureCrest();
     for (const entry of this.flashTimers.values()) {
       clearTimeout(entry.timer);
     }
@@ -767,7 +993,9 @@ export class GameUI {
     this.toasts.dispose();
     this.fairySkills.dispose();
     this.princessButton.dispose();
+    this.castleInteriorUi.dispose();
     this.survivalFx.dispose();
+    this.adventureCrestEl.remove();
     this.topStackEl.remove();
     this.shellEl.remove();
   }

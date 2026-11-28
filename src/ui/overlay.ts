@@ -97,7 +97,7 @@ export class GameOverlay {
     });
     this.subtitleEl = el('p', {
       className: 'overlay-subtitle',
-      text: 'Thế Giới Mở 5× (560×560) • Phiên 5 Phút Săn Bot 360° & DualSense',
+      text: '7 Vùng Đất Kỳ Diệu • 11 Lâu Đài & 6 Kỳ Quan Khổng Lồ • Săn Bot 360°',
     });
     this.praiseEl = el('p', { className: 'overlay-praise hidden' });
     this.eatenByBannerEl = el('p', { className: 'overlay-eaten-banner hidden' });
@@ -111,7 +111,7 @@ export class GameOverlay {
     });
     this.huntTipEl = el('div', {
       className: 'overlay-hunt-tip',
-      text: '🧚‍♀️ Các Nàng Tiên bảo vệ sẽ ghé thăm tặng phép màu • 🏰 Khám phá 11 Lâu Đài tráng lệ & săn Bot 360°!',
+      text: '🧭 Theo La Bàn khám phá 7 Vùng Đất, 11 Lâu Đài & 6 Kỳ Quan Đồ Sộ • 🧚‍♀️ Nàng Tiên đồng hành!',
     });
 
     // --- Age Profile Cards ---
@@ -394,7 +394,8 @@ export class GameOverlay {
     this.rootEl.dataset['difficulty'] = this.selectedDifficulty;
     this.rootEl.dataset['ageProfile'] = this.selectedAgeProfile;
     this.titleEl.textContent = '✨ Vương Quốc Rắn Phép Thuật 3D';
-    this.subtitleEl.textContent = 'Thế Giới Mở Săn Bot 360° cùng DualSense trên macOS';
+    this.subtitleEl.textContent =
+      'Phiêu Lưu 7 Vùng Đất • 11 Lâu Đài & 6 Kỳ Quan Khổng Lồ cùng DualSense';
     this.subtitleEl.classList.remove('hidden');
     this.praiseEl.classList.add('hidden');
     this.eatenByBannerEl.classList.add('hidden');

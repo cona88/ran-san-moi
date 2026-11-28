@@ -1,9 +1,11 @@
 import type {
   AgeProfile,
   BoosterKind,
+  CastleCosmeticSlot,
   Difficulty,
   FairySkillKind,
   GameMode,
+  ShelterKind,
   SnakeForm,
   VisualTheme,
 } from '../core/types';
@@ -31,6 +33,10 @@ export interface GameUICallbacks {
   onButterflyHold?(active: boolean): void;
   onSpeakQuest?(): void;
   onTogglePrincess?(): void;
+  onToggleVista?(): boolean;
+  onEnterCastle?(): void;
+  onExitCastle?(): void;
+  onEquipCastleItem?(slot: CastleCosmeticSlot, kind: ShelterKind | null): void;
 }
 
 /** Initial user preferences passed into {@link GameUI}. */
