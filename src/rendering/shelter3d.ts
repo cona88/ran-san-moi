@@ -28,6 +28,12 @@ import type {
   ShelterHouse,
 } from '../core/types';
 import { cellToWorld } from './world';
+import {
+  animateCastlePrecinct,
+  attachCastlePrecinct,
+  getCastlePrecinct,
+  type CastlePrecinctHandle,
+} from './castlePrecincts3d';
 
 const FLOOR_Y = -0.47;
 const SHADOW_Y = 0.03; // Crisp ground shadow directly on the terrain (Y = 0.03)
@@ -161,6 +167,7 @@ interface ShelterVisualEntry {
   readonly beaconBeam: Mesh<CylinderGeometry, MeshBasicMaterial>;
   readonly beaconBeamMat: MeshBasicMaterial;
   readonly sparkMotes: readonly ShelterSparkleMote[];
+  readonly precinct?: CastlePrecinctHandle;
   // Dynamic state
   insideLevel: number; // 0..1 smooth interpolation
   warningLevel: number; // 0..1 smooth interpolation
@@ -397,6 +404,7 @@ function createMushroomHouse(shelter: ShelterHouse): Group {
     house.add(spore);
   }
 
+  attachCastlePrecinct(house, shelter);
   return house;
 }
 
@@ -715,6 +723,7 @@ function createCastleHouse(shelter: ShelterHouse): Group {
   gateGroup.add(gateLight);
 
   house.add(gateGroup);
+  attachCastlePrecinct(house, shelter);
   return house;
 }
 
@@ -831,6 +840,7 @@ function createCrystalSanctuary(shelter: ShelterHouse): Group {
   runeRing.position.y = 1.09;
   house.add(runeRing);
 
+  attachCastlePrecinct(house, shelter);
   return house;
 }
 
@@ -1094,6 +1104,7 @@ export function createMermaidPalace(shelter: ShelterHouse): Group {
   gateGroup.add(portal);
 
   house.add(gateGroup);
+  attachCastlePrecinct(house, shelter);
   return house;
 }
 
@@ -1338,6 +1349,7 @@ export function createCandyCastle(shelter: ShelterHouse): Group {
   rainbowGroup.add(portal);
 
   house.add(rainbowGroup);
+  attachCastlePrecinct(house, shelter);
   return house;
 }
 
@@ -1557,6 +1569,7 @@ export function createBlossomSanctuary(shelter: ShelterHouse): Group {
   pad.position.y = 0.52;
   house.add(pad);
 
+  attachCastlePrecinct(house, shelter);
   return house;
 }
 
@@ -1751,6 +1764,7 @@ export function createStarlightPalace(shelter: ShelterHouse): Group {
   gateGroup.add(portal);
 
   house.add(gateGroup);
+  attachCastlePrecinct(house, shelter);
   return house;
 }
 
@@ -1918,6 +1932,7 @@ export function createShelterVisual(shelter: ShelterHouse): ShelterVisualEntry {
     beaconBeam,
     beaconBeamMat,
     sparkMotes: sparkleMotes,
+    precinct: getCastlePrecinct(houseGroup),
     insideLevel: 0,
     warningLevel: 0,
     strikeLevel: 0,
@@ -2669,6 +2684,10 @@ export class Shelter3DView {
             crescent.rotation.z = Math.sin(elapsed * 2.0 + i) * 0.15;
           }
         }
+      }
+
+      if (near && entry.precinct) {
+        animateCastlePrecinct(entry.precinct, elapsed);
       }
 
       // Protective Dome visual pulsation (crystal-clear at rest, bright when active)
